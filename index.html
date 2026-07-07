@@ -1,0 +1,2092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Norikae — Tokyo Transit (EN)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚇</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  /* ===================== THEME / TOKENS ===================== */
+  :root {
+    --red: #d80032; --red-bright: #ff0033; --red-dark: #a3001f;
+    --bg: #f2f3f5; --card: #ffffff;
+    --ink: #1a1a1a; --sub: #6b6b6b; --line: #e4e4e7; --green: #0a8a3a;
+    --teiki: #7b3ff2; --teiki-bg: #f3edff; --blue: #1a73e8;
+    --field: #fafafa; color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000; --card: #1c1c1e;
+      --ink: #f2f2f2; --sub: #a3a3a3; --line: #333;
+      --teiki-bg: #2a2140; --blue: #6ab0ff;
+      --field: #101113; color-scheme: dark;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* every form control themed, incl. bare dialog inputs */
+  input, select, textarea { background: var(--field); color: var(--ink); }
+  ::selection { background: #3a6ff2; color: #fff; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Hiragino Sans", sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--card); border-bottom: 3px solid var(--red-bright); padding: 10px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 1001; }
+  header h1 { font-size: 18px; font-weight: 800; }
+  header h1 span { color: var(--red); }
+  header .tag { font-size: 11px; color: var(--sub); }
+  header button { margin-left: auto; background: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--ink); min-height: 44px; }
+  main { max-width: 680px; margin: 0 auto; padding: 12px; }
+
+  .panel { background: var(--card); border-radius: 12px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+  .row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+  .stn-inputs { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .field { position: relative; }
+  .field input {
+    width: 100%; padding: 10px 40px 10px 12px; border: 1.5px solid var(--line); border-radius: 8px; font-size: 15px; background: var(--field); color: var(--ink); min-height: 44px;
+  }
+  .field input:focus { outline: 2px solid var(--red); border-color: transparent; background: var(--card); }
+  .field .locbtn {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+    border: none; background: none; font-size: 17px; cursor: pointer; color: var(--blue);
+  }
+  .dropdown {
+    position: absolute; top: calc(100% + 3px); left: 0; right: 0; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12);
+    z-index: 1002; max-height: 300px; overflow-y: auto; display: none;
+  }
+  .dropdown .item { min-height: 44px; padding: 9px 12px; font-size: 14px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  .dropdown .item:hover, .dropdown .item.hl { background: #f5f7ff; }
+  @media (prefers-color-scheme: dark) { .dropdown .item:hover, .dropdown .item.hl { background: #2a2a3d; } }
+  .dropdown .item .icn { width: 18px; text-align: center; }
+  .dropdown .item .sub { color: var(--sub); font-size: 12px; margin-left: auto; }
+  .dropdown .sect { font-size: 10.5px; font-weight: 700; color: var(--sub); text-transform: uppercase; padding: 7px 12px 2px; letter-spacing: .5px; }
+  .dropdown .item.muted { color: var(--sub); cursor: default; }
+  .swap { width: 44px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; font-size: 16px; }
+  .opts { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+  select, input[type=time], input[type=password] { padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 8px; font-size: 14px; background: var(--field); color: var(--ink); min-height: 44px; }
+  .opts select, .opts input[type=time] { flex: 1; min-width: 100px; }
+  .go { width: 100%; padding: 13px; background: var(--red); color: #fff; font-size: 16px; font-weight: 700; border: none; border-radius: 10px; cursor: pointer; min-height: 44px; }
+  .go:active { background: var(--red-dark); }
+  .go:disabled { opacity: .6; }
+
+  .teiki-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--teiki-bg); color: var(--teiki); font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; margin-top: 10px; cursor: pointer; border: none; min-height: 44px; }
+
+  #map { height: 300px; border-radius: 12px; margin-top: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.07); display: none; z-index: 1; }
+  @media (prefers-color-scheme: dark) {
+    #map .leaflet-tile { filter: brightness(.7) invert(1) hue-rotate(180deg) saturate(.8) contrast(.9); }
+  }
+
+  .results-head { font-size: 14px; font-weight: 700; margin: 14px 0 4px; color: var(--ink); }
+  .tabs { display: flex; gap: 6px; margin: 8px 0 8px; }
+  .tabs button { flex: 1; min-height: 44px; padding: 8px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--sub); }
+  .tabs button.on { border-color: var(--red); color: var(--red); background: #fff5f6; }
+  @media (prefers-color-scheme: dark) { .tabs button.on { background: #2a1418; } }
+
+  .route { background: var(--card); border-radius: 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.07); overflow: hidden; cursor: pointer; border: 2px solid transparent; }
+  .route.sel { border-color: var(--blue); }
+  .route:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .route-head { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .route-head .time { font-size: 19px; font-weight: 800; }
+  .route-head .dur { color: var(--sub); font-size: 13px; }
+  .badges { margin-left: auto; display: flex; gap: 5px; flex-wrap: wrap; }
+  .badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; }
+  .b-fast { background: #ffe0e5; color: #9c0026; }
+  .b-cheap { background: #d7f3e0; color: #0b5c28; }
+  .b-easy { background: #dbe8ff; color: #1d4f91; }
+  .b-teiki { background: var(--teiki-bg); color: var(--teiki); }
+  .b-walk { background: #e2e2e2; color: #3f3f3f; }
+  .route-meta { padding: 8px 14px; display: flex; gap: 16px; font-size: 13px; color: var(--sub); border-bottom: 1px solid var(--line); }
+  .fare strong { color: var(--ink); font-size: 15px; }
+  .fare .was { text-decoration: line-through; color: #8a8a8a; margin-left: 6px; }
+  .fare .free { color: var(--teiki); font-weight: 800; }
+  .delaymark { color: #9c6f00; font-weight: 700; font-size: 11.5px; }
+  @media (prefers-color-scheme: dark) { .delaymark { color: #e0b000; } }
+
+  .legs { padding: 10px 14px 14px; }
+  .leg { display: flex; gap: 12px; }
+  .leg .bar { width: 6px; border-radius: 3px; margin: 2px 0; }
+  .leg .walkbar { width: 6px; border-left: 3px dotted #bbb; margin-left: 1px; }
+  .leg .body { flex: 1; padding-bottom: 10px; }
+  .leg .stn { font-weight: 700; font-size: 14px; }
+  .leg .linfo { font-size: 12.5px; color: var(--sub); margin: 3px 0 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .teiki-mark { color: var(--teiki); font-weight: 700; font-size: 11.5px; }
+  .nstops { color: var(--sub); }
+  .dep-sched { font-size: 11.5px; color: var(--sub); margin-top: 2px; }
+
+  .delaybar { background: #fff8e1; border: 1px solid #f0d264; color: #7a5c00; font-size: 12.5px; border-radius: 8px; padding: 8px 10px; margin-top: 10px; display: none; }
+  @media (prefers-color-scheme: dark) { .delaybar { background: #362d0d; border-color: #6b551a; color: #e0c04a; } }
+
+  dialog { border: none; border-radius: 14px; padding: 0; max-width: 420px; width: 92%; background: var(--card); color: var(--ink); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  .dlg { padding: 18px; }
+  .dlg h2 { font-size: 16px; margin-bottom: 12px; }
+  .dlg label { display: block; font-size: 12.5px; font-weight: 600; color: var(--sub); margin: 10px 0 4px; }
+  .dlg select, .dlg input { width: 100%; }
+  .dlg .actions { display: flex; gap: 8px; margin-top: 16px; }
+  .dlg .actions button { flex: 1; min-height: 44px; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; font-weight: 600; }
+  .dlg .actions .primary { background: var(--red); border-color: var(--red); color: #fff; }
+  .hint { font-size: 11.5px; color: var(--sub); margin-top: 6px; line-height: 1.5; }
+  .err { background: #ffecec; color: #b00020; padding: 10px 12px; border-radius: 8px; font-size: 13.5px; margin-top: 12px; }
+  @media (prefers-color-scheme: dark) { .err { background: #3a1418; color: #ff8080; } }
+  .dlg-err { background: #ffecec; color: #b00020; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; margin-top: 8px; display: none; }
+  @media (prefers-color-scheme: dark) { .dlg-err { background: #3a1418; color: #ff8080; } }
+  footer { text-align: center; font-size: 11px; color: var(--sub); padding: 18px 0 26px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Norikae<span>!</span></h1>
+  <div class="tag">Tokyo Transit · EN</div>
+  <button id="btnSettings">⚙︎ Settings</button>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="row">
+      <div class="stn-inputs">
+        <div class="field" id="fFrom">
+          <input type="text" id="from" placeholder="From — station, address, or place" autocomplete="off"
+            aria-label="From: station, address, or place" role="combobox" aria-expanded="false"
+            aria-controls="ddFrom" aria-autocomplete="list">
+          <button class="locbtn" id="btnLoc" title="Use my location" aria-label="Use my current location">📍</button>
+          <div class="dropdown" id="ddFrom" role="listbox"></div>
+        </div>
+        <div class="field" id="fTo">
+          <input type="text" id="to" placeholder="To — station, address, or place" autocomplete="off"
+            aria-label="To: station, address, or place" role="combobox" aria-expanded="false"
+            aria-controls="ddTo" aria-autocomplete="list">
+          <div class="dropdown" id="ddTo" role="listbox"></div>
+        </div>
+      </div>
+      <button class="swap" id="swap" title="Swap" aria-label="Swap origin and destination">⇅</button>
+    </div>
+    <div class="opts">
+      <select id="mode" aria-label="Time mode">
+        <option value="depart">Depart at</option>
+        <option value="arrive">Arrive by</option>
+        <option value="now" selected>Leave now</option>
+      </select>
+      <input type="time" id="time" disabled aria-label="Time">
+    </div>
+    <button class="go" id="go">Search routes</button>
+    <button class="teiki-chip" id="teikiChip">🎫 <span id="teikiLabel"></span></button>
+    <div class="delaybar" id="delaybar" aria-live="polite"></div>
+    <div id="error" role="alert"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="results-head" id="resultsHead" style="display:none"></div>
+  <div class="tabs" id="tabs" style="display:none">
+    <button data-sort="time" class="on">⏱ Time</button>
+    <button data-sort="fare">💴 Fare</button>
+    <button data-sort="transfers">🔄 Transfers</button>
+  </div>
+  <div id="results"></div>
+
+  <footer>
+    Times &amp; fares are estimates from a bundled network model — verify before travel.<br>
+    Places via OpenStreetMap (Photon/Nominatim) · Map © OpenStreetMap contributors.<br>
+    Live delays &amp; scheduled departures with a free <a href="https://developer.odpt.org/" target="_blank">ODPT</a> key (Settings).
+  </footer>
+</main>
+
+<dialog id="dlgTeiki" aria-labelledby="tkTitle">
+  <div class="dlg">
+    <h2 id="tkTitle">🎫 Commuter pass (teiki)</h2>
+    <label for="tkLine">Line</label><select id="tkLine"></select>
+    <label for="tkFrom">From</label><select id="tkFrom"></select>
+    <label for="tkTo">To</label><select id="tkTo"></select>
+    <p class="hint">Trips along this segment are treated as ¥0. Routes through your pass are preferred when cheaper; partial overlaps split the fare at the pass boundary.</p>
+    <div class="dlg-err" id="tkErr"></div>
+    <div class="actions">
+      <button id="tkClear">Remove pass</button>
+      <button class="primary" id="tkSave">Save</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dlgSettings" aria-labelledby="setTitle">
+  <div class="dlg">
+    <h2 id="setTitle">⚙︎ Settings</h2>
+    <label for="odptKey">ODPT API key (optional)</label>
+    <input type="password" id="odptKey" placeholder="acl:consumerKey from developer.odpt.org">
+    <p class="hint">Free at <b>developer.odpt.org</b>. With a key, routes show real scheduled departure times and live delay alerts.</p>
+    <label for="homeAddr">🏠 Home</label>
+    <input type="text" id="homeAddr" placeholder="Station name or address">
+    <label for="workAddr">💼 Work</label>
+    <input type="text" id="workAddr" placeholder="Station name or address">
+    <div class="dlg-err" id="setErr"></div>
+    <div class="actions">
+      <button id="setClose">Close</button>
+      <button class="primary" id="setSave">Save</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* === inlined data/network.js === */
+/* =========================================================
+ * Norikae — bundled Greater Tokyo rail network
+ * Curated dataset (approximate times/fares). Can be
+ * regenerated from live ODPT data via scripts/build-network.mjs
+ * ========================================================= */
+window.NETWORK = (() => {
+
+  // operator: metro | toei | jr
+  // minPerHop: average minutes between adjacent stations
+  // kmPerHop: average km between adjacent stations (used for fare bands)
+  // headway: typical minutes between trains (daytime)
+  const LINES = [
+    // ---------------- Toei ----------------
+    { id: "E", name: "Toei Oedo Line", operator: "toei", color: "#b6007a", minPerHop: 2, kmPerHop: 1.1, headway: 6,
+      stations: ["Hikarigaoka","Nerima-kasugacho","Toshimaen","Nerima","Shin-egota","Ochiai-minami-nagasaki","Nakai","Higashi-nakano","Nakano-sakaue","Nishi-shinjuku-gochome","Tochomae","Shinjuku-nishiguchi","Higashi-shinjuku","Wakamatsu-kawada","Ushigome-yanagicho","Ushigome-kagurazaka","Iidabashi","Kasuga","Hongo-sanchome","Ueno-okachimachi","Shin-okachimachi","Kuramae","Ryogoku","Morishita","Kiyosumi-shirakawa","Monzen-nakacho","Tsukishima","Kachidoki","Tsukijishijo","Shiodome","Daimon","Akabanebashi","Azabu-juban","Roppongi","Aoyama-itchome","Kokuritsu-kyogijo","Yoyogi","Shinjuku","Tochomae"] },
+    { id: "I", name: "Toei Mita Line", operator: "toei", color: "#0079c2", minPerHop: 2, kmPerHop: 1.1, headway: 6,
+      stations: ["Meguro","Shirokanedai","Shirokane-takanawa","Mita","Shibakoen","Onarimon","Uchisaiwaicho","Hibiya","Otemachi","Jimbocho","Suidobashi","Kasuga","Hakusan","Sengoku","Sugamo","Nishi-sugamo","Shin-itabashi","Itabashikuyakushomae","Itabashihoncho","Motohasunuma","Shimura-sakaue","Shimura-sanchome","Hasune","Nishidai","Takashimadaira","Shin-takashimadaira","Nishi-takashimadaira"] },
+    { id: "S", name: "Toei Shinjuku Line", operator: "toei", color: "#6cbb5a", minPerHop: 2, kmPerHop: 1.2, headway: 6,
+      stations: ["Shinjuku","Shinjuku-sanchome","Akebonobashi","Ichigaya","Kudanshita","Jimbocho","Ogawamachi","Iwamotocho","Bakuroyokoyama","Hamacho","Morishita","Kikukawa","Sumiyoshi","Nishi-ojima","Ojima","Higashi-ojima","Funabori","Ichinoe","Mizue","Shinozaki","Motoyawata"] },
+    { id: "A", name: "Toei Asakusa Line", operator: "toei", color: "#e85298", minPerHop: 2, kmPerHop: 1.1, headway: 6,
+      stations: ["Nishi-magome","Magome","Nakanobu","Togoshi","Gotanda","Takanawadai","Sengakuji","Mita","Daimon","Shimbashi","Higashi-ginza","Takaracho","Nihombashi","Ningyocho","Higashi-nihombashi","Asakusabashi","Kuramae","Asakusa","Honjo-azumabashi","Oshiage"] },
+    // ---------------- Tokyo Metro ----------------
+    { id: "G", name: "Ginza Line", operator: "metro", color: "#f39700", minPerHop: 2, kmPerHop: 1.0, headway: 4,
+      stations: ["Shibuya","Omote-sando","Gaiemmae","Aoyama-itchome","Akasaka-mitsuke","Tameike-sanno","Toranomon","Shimbashi","Ginza","Kyobashi","Nihombashi","Mitsukoshimae","Kanda","Suehirocho","Ueno-hirokoji","Ueno","Inaricho","Tawaramachi","Asakusa"] },
+    { id: "M", name: "Marunouchi Line", operator: "metro", color: "#e60012", minPerHop: 2, kmPerHop: 1.1, headway: 4,
+      stations: ["Ogikubo","Minami-asagaya","Shin-koenji","Higashi-koenji","Shin-nakano","Nakano-sakaue","Nishi-shinjuku","Shinjuku","Shinjuku-sanchome","Shinjuku-gyoemmae","Yotsuya-sanchome","Yotsuya","Akasaka-mitsuke","Kokkai-gijidomae","Kasumigaseki","Ginza","Tokyo","Otemachi","Awajicho","Ochanomizu","Hongo-sanchome","Korakuen","Myogadani","Shin-otsuka","Ikebukuro"] },
+    { id: "H", name: "Hibiya Line", operator: "metro", color: "#9caeb7", minPerHop: 2, kmPerHop: 1.1, headway: 5,
+      stations: ["Naka-meguro","Ebisu","Hiroo","Roppongi","Kamiyacho","Toranomon Hills","Kasumigaseki","Hibiya","Ginza","Higashi-ginza","Tsukiji","Hatchobori","Kayabacho","Ningyocho","Kodemmacho","Akihabara","Naka-okachimachi","Ueno","Iriya","Minowa","Minami-senju","Kita-senju"] },
+    { id: "T", name: "Tozai Line", operator: "metro", color: "#00a7db", minPerHop: 2, kmPerHop: 1.4, headway: 4,
+      stations: ["Nakano","Ochiai","Takadanobaba","Waseda","Kagurazaka","Iidabashi","Kudanshita","Takebashi","Otemachi","Nihombashi","Kayabacho","Monzen-nakacho","Kiba","Toyocho","Minami-sunamachi","Nishi-kasai","Kasai","Urayasu","Minami-gyotoku","Gyotoku","Myoden","Baraki-nakayama","Nishi-funabashi"] },
+    { id: "C", name: "Chiyoda Line", operator: "metro", color: "#00bb85", minPerHop: 2, kmPerHop: 1.2, headway: 4,
+      stations: ["Yoyogi-uehara","Yoyogi-koen","Meiji-jingumae","Omote-sando","Nogizaka","Akasaka","Kokkai-gijidomae","Kasumigaseki","Hibiya","Nijubashimae","Otemachi","Shin-ochanomizu","Yushima","Nezu","Sendagi","Nishi-nippori","Machiya","Kita-senju","Ayase","Kita-ayase"] },
+    { id: "Y", name: "Yurakucho Line", operator: "metro", color: "#c1a470", minPerHop: 2, kmPerHop: 1.2, headway: 5,
+      stations: ["Wakoshi","Chikatetsu-narimasu","Chikatetsu-akatsuka","Heiwadai","Hikawadai","Kotake-mukaihara","Senkawa","Kanamecho","Ikebukuro","Higashi-ikebukuro","Gokokuji","Edogawabashi","Iidabashi","Ichigaya","Kojimachi","Nagatacho","Sakuradamon","Yurakucho","Ginza-itchome","Shintomicho","Tsukishima","Toyosu","Tatsumi","Shin-kiba"] },
+    { id: "Z", name: "Hanzomon Line", operator: "metro", color: "#8f76d6", minPerHop: 2, kmPerHop: 1.3, headway: 5,
+      stations: ["Shibuya","Omote-sando","Aoyama-itchome","Nagatacho","Hanzomon","Kudanshita","Jimbocho","Otemachi","Mitsukoshimae","Suitengumae","Kiyosumi-shirakawa","Sumiyoshi","Kinshicho","Oshiage"] },
+    { id: "N", name: "Namboku Line", operator: "metro", color: "#00ac9b", minPerHop: 2, kmPerHop: 1.2, headway: 6,
+      stations: ["Meguro","Shirokanedai","Shirokane-takanawa","Azabu-juban","Roppongi-itchome","Tameike-sanno","Nagatacho","Yotsuya","Ichigaya","Iidabashi","Korakuen","Todaimae","Hon-komagome","Komagome","Nishigahara","Oji","Oji-kamiya","Shimo","Akabane-iwabuchi"] },
+    { id: "F", name: "Fukutoshin Line", operator: "metro", color: "#9c5e31", minPerHop: 2, kmPerHop: 1.3, headway: 5,
+      stations: ["Wakoshi","Chikatetsu-narimasu","Chikatetsu-akatsuka","Heiwadai","Hikawadai","Kotake-mukaihara","Senkawa","Kanamecho","Ikebukuro","Zoshigaya","Nishi-waseda","Higashi-shinjuku","Shinjuku-sanchome","Kita-sando","Meiji-jingumae","Shibuya"] },
+    // ---------------- JR East ----------------
+    { id: "JY", name: "JR Yamanote Line", operator: "jr", color: "#9acd32", minPerHop: 2, kmPerHop: 1.2, headway: 4, loop: true,
+      stations: ["Tokyo","Kanda","Akihabara","Okachimachi","Ueno","Uguisudani","Nippori","Nishi-nippori","Tabata","Komagome","Sugamo","Otsuka","Ikebukuro","Mejiro","Takadanobaba","Shin-okubo","Shinjuku","Yoyogi","Harajuku","Shibuya","Ebisu","Meguro","Gotanda","Osaki","Shinagawa","Takanawa Gateway","Tamachi","Hamamatsucho","Shimbashi","Yurakucho"] },
+    { id: "JB", name: "JR Chuo-Sobu Line (Local)", operator: "jr", color: "#ffd400", minPerHop: 2, kmPerHop: 1.3, headway: 5,
+      stations: ["Mitaka","Kichijoji","Nishi-ogikubo","Ogikubo","Asagaya","Koenji","Nakano","Higashi-nakano","Okubo","Shinjuku","Yoyogi","Sendagaya","Shinanomachi","Yotsuya","Ichigaya","Iidabashi","Suidobashi","Ochanomizu","Akihabara","Asakusabashi","Ryogoku","Kinshicho","Kameido","Hirai","Shin-koiwa","Koiwa","Ichikawa","Motoyawata","Shimosa-nakayama","Nishi-funabashi"] },
+    { id: "JC", name: "JR Chuo Line (Rapid)", operator: "jr", color: "#f15a22", minPerHop: 4, kmPerHop: 2.6, headway: 5,
+      stations: ["Tokyo","Kanda","Ochanomizu","Yotsuya","Shinjuku","Nakano","Ogikubo","Kichijoji","Mitaka"] },
+    { id: "JK", name: "JR Keihin-Tohoku Line", operator: "jr", color: "#00b2e5", minPerHop: 2, kmPerHop: 1.4, headway: 5,
+      stations: ["Akabane","Higashi-jujo","Oji","Kami-nakazato","Tabata","Nishi-nippori","Nippori","Uguisudani","Ueno","Okachimachi","Akihabara","Kanda","Tokyo","Yurakucho","Shimbashi","Hamamatsucho","Tamachi","Takanawa Gateway","Shinagawa","Oimachi","Omori","Kamata"] }
+  ];
+
+  // Walk transfers between differently-named stations (minutes)
+  const WALKS = [
+    ["Harajuku","Meiji-jingumae",3],
+    ["Shinjuku-nishiguchi","Shinjuku",4],
+    ["Kasuga","Korakuen",3],
+    ["Ueno-okachimachi","Okachimachi",3],
+    ["Ueno-okachimachi","Ueno-hirokoji",2],
+    ["Ueno-okachimachi","Naka-okachimachi",3],
+    ["Ueno-hirokoji","Okachimachi",2],
+    ["Naka-okachimachi","Okachimachi",2],
+    ["Shiodome","Shimbashi",4],
+    ["Tsukijishijo","Tsukiji",3],
+    ["Otemachi","Tokyo",7],
+    ["Hibiya","Yurakucho",4],
+    ["Ginza","Higashi-ginza",4],
+    ["Ginza","Ginza-itchome",4],
+    ["Nagatacho","Akasaka-mitsuke",3],
+    ["Tameike-sanno","Kokkai-gijidomae",3],
+    ["Toranomon","Toranomon Hills",3],
+    ["Awajicho","Ogawamachi",2],
+    ["Awajicho","Shin-ochanomizu",3],
+    ["Ogawamachi","Shin-ochanomizu",3],
+    ["Bakuroyokoyama","Higashi-nihombashi",3],
+    ["Hamamatsucho","Daimon",4],
+    ["Akabane","Akabane-iwabuchi",8],
+    ["Iwamotocho","Akihabara",5],
+    ["Yurakucho","Ginza",5],
+    ["Ochanomizu","Shin-ochanomizu",3]
+  ];
+
+  // Approximate paper-ticket fare bands: [maxKm, yen]
+  const FARES = {
+    metro: [[6,180],[11,210],[19,260],[27,300],[999,330]],
+    toei:  [[4,180],[9,220],[15,280],[21,320],[999,380]],
+    jr:    [[3,150],[6,170],[10,180],[15,230],[20,290],[25,340],[35,480],[999,580]]
+  };
+
+  // Discount when transferring Metro <-> Toei on one journey (yen)
+  const METRO_TOEI_DISCOUNT = 70;
+
+  // Extra minutes for transfers between specific station complexes
+  const TRANSFER_DEFAULT = 4;   // same-station, different line
+  const TRANSFER_CROSS_OP = 6;  // JR <-> subway etc.
+  const BOARD_ACCESS = 2;       // entering the system
+
+  return { LINES, WALKS, FARES, METRO_TOEI_DISCOUNT, TRANSFER_DEFAULT, TRANSFER_CROSS_OP, BOARD_ACCESS,
+           generatedAt: "bundled", source: "curated" };
+})();
+
+</script>
+<script>
+/* === inlined data/coords.js === */
+/* Station coordinates: exact ODPT values (subway) merged over hand anchors (JR).
+ * Names normalized to match data/network.js. Generated 2026-07-07. */
+window.STATION_ANCHORS = {
+  "Akabane":[35.77800,139.72090],
+  "Akabane-iwabuchi":[35.78336,139.72211],
+  "Akabanebashi":[35.65499,139.74399],
+  "Akasaka":[35.67210,139.73641],
+  "Akasaka-mitsuke":[35.67685,139.73735],
+  "Akebonobashi":[35.69240,139.72232],
+  "Akihabara":[35.69797,139.77553],
+  "Aoyama-itchome":[35.67294,139.72406],
+  "Asagaya":[35.70480,139.63570],
+  "Asakusa":[35.70983,139.79716],
+  "Asakusabashi":[35.69749,139.78634],
+  "Awajicho":[35.69487,139.76746],
+  "Ayase":[35.76228,139.82489],
+  "Azabu-juban":[35.65563,139.73669],
+  "Bakuroyokoyama":[35.69193,139.78301],
+  "Baraki-nakayama":[35.70330,139.94191],
+  "Chikatetsu-akatsuka":[35.76998,139.64400],
+  "Chikatetsu-narimasu":[35.77674,139.63117],
+  "Daimon":[35.65677,139.75519],
+  "Ebisu":[35.64704,139.70870],
+  "Edogawabashi":[35.70929,139.73413],
+  "Funabori":[35.68376,139.86396],
+  "Gaiemmae":[35.67037,139.71783],
+  "Ginza":[35.67245,139.76428],
+  "Ginza-itchome":[35.67452,139.76679],
+  "Gokokuji":[35.71918,139.72745],
+  "Gotanda":[35.62688,139.72396],
+  "Gyotoku":[35.68262,139.91419],
+  "Hakusan":[35.72168,139.75213],
+  "Hamacho":[35.68860,139.78772],
+  "Hamamatsucho":[35.65540,139.75700],
+  "Hanzomon":[35.68538,139.74169],
+  "Harajuku":[35.67020,139.70270],
+  "Hasune":[35.78426,139.67895],
+  "Hatchobori":[35.67537,139.77733],
+  "Heiwadai":[35.75756,139.65430],
+  "Hibiya":[35.67477,139.76006],
+  "Higashi-ginza":[35.66952,139.76749],
+  "Higashi-ikebukuro":[35.72595,139.71886],
+  "Higashi-jujo":[35.76400,139.72900],
+  "Higashi-koenji":[35.69797,139.65830],
+  "Higashi-nakano":[35.70716,139.68311],
+  "Higashi-nihombashi":[35.69212,139.78489],
+  "Higashi-ojima":[35.68996,139.84725],
+  "Higashi-shinjuku":[35.69889,139.70764],
+  "Hikarigaoka":[35.75853,139.62890],
+  "Hikawadai":[35.74962,139.66547],
+  "Hirai":[35.70590,139.84190],
+  "Hiroo":[35.65150,139.72221],
+  "Hon-komagome":[35.72436,139.75381],
+  "Hongo-sanchome":[35.70712,139.76034],
+  "Honjo-azumabashi":[35.70857,139.80440],
+  "Ichigaya":[35.69239,139.73692],
+  "Ichikawa":[35.72840,139.90800],
+  "Ichinoe":[35.68599,139.88259],
+  "Iidabashi":[35.70158,139.74436],
+  "Ikebukuro":[35.72977,139.71102],
+  "Inaricho":[35.71139,139.78221],
+  "Iriya":[35.72057,139.78447],
+  "Itabashihoncho":[35.76131,139.70554],
+  "Itabashikuyakushomae":[35.75137,139.71012],
+  "Iwamotocho":[35.69561,139.77511],
+  "Jimbocho":[35.69584,139.75783],
+  "Kachidoki":[35.65893,139.77714],
+  "Kagurazaka":[35.70387,139.73452],
+  "Kamata":[35.56240,139.71600],
+  "Kameido":[35.69730,139.82660],
+  "Kami-nakazato":[35.74720,139.74690],
+  "Kamiyacho":[35.66262,139.74472],
+  "Kanamecho":[35.73322,139.69848],
+  "Kanda":[35.69371,139.77089],
+  "Kasai":[35.66362,139.87253],
+  "Kasuga":[35.70901,139.75289],
+  "Kasumigaseki":[35.67373,139.75205],
+  "Kayabacho":[35.67971,139.77944],
+  "Kiba":[35.66936,139.80712],
+  "Kichijoji":[35.70310,139.57970],
+  "Kikukawa":[35.68840,139.80606],
+  "Kinshicho":[35.69744,139.81496],
+  "Kita-ayase":[35.77689,139.83210],
+  "Kita-sando":[35.67850,139.70547],
+  "Kita-senju":[35.74955,139.80500],
+  "Kiyosumi-shirakawa":[35.68224,139.79930],
+  "Kodemmacho":[35.69042,139.77876],
+  "Koenji":[35.70530,139.64970],
+  "Koiwa":[35.73310,139.88170],
+  "Kojimachi":[35.68478,139.73735],
+  "Kokkai-gijidomae":[35.67425,139.74433],
+  "Kokuritsu-kyogijo":[35.67990,139.71467],
+  "Komagome":[35.73591,139.74691],
+  "Korakuen":[35.70785,139.75132],
+  "Kotake-mukaihara":[35.74339,139.67952],
+  "Kudanshita":[35.69581,139.75135],
+  "Kuramae":[35.70436,139.79155],
+  "Kyobashi":[35.67670,139.77011],
+  "Machiya":[35.74207,139.78005],
+  "Magome":[35.59677,139.71188],
+  "Meguro":[35.63306,139.71555],
+  "Meiji-jingumae":[35.66866,139.70459],
+  "Mejiro":[35.72120,139.70640],
+  "Minami-asagaya":[35.69946,139.63557],
+  "Minami-gyotoku":[35.67273,139.90228],
+  "Minami-senju":[35.73231,139.79878],
+  "Minami-sunamachi":[35.66842,139.83169],
+  "Minowa":[35.72928,139.79117],
+  "Mita":[35.64770,139.74794],
+  "Mitaka":[35.70260,139.56060],
+  "Mitsukoshimae":[35.68605,139.77333],
+  "Mizue":[35.69351,139.89770],
+  "Monzen-nakacho":[35.67233,139.79561],
+  "Morishita":[35.68795,139.79744],
+  "Motohasunuma":[35.76857,139.70241],
+  "Motoyawata":[35.72282,139.92661],
+  "Myoden":[35.69101,139.92429],
+  "Myogadani":[35.71720,139.73690],
+  "Nagatacho":[35.67813,139.74042],
+  "Naka-meguro":[35.64411,139.69883],
+  "Naka-okachimachi":[35.70665,139.77619],
+  "Nakai":[35.71393,139.68630],
+  "Nakano":[35.70574,139.66560],
+  "Nakano-sakaue":[35.69749,139.68255],
+  "Nakanobu":[35.60527,139.71365],
+  "Nerima":[35.73741,139.65476],
+  "Nerima-kasugacho":[35.75141,139.64030],
+  "Nezu":[35.71733,139.76575],
+  "Nihombashi":[35.68211,139.77434],
+  "Nijubashimae":[35.68050,139.76178],
+  "Ningyocho":[35.68630,139.78231],
+  "Nippori":[35.72780,139.77080],
+  "Nishi-funabashi":[35.70717,139.95877],
+  "Nishi-kasai":[35.66456,139.85960],
+  "Nishi-magome":[35.58705,139.70609],
+  "Nishi-nippori":[35.73235,139.76689],
+  "Nishi-ogikubo":[35.70360,139.59930],
+  "Nishi-ojima":[35.68939,139.82623],
+  "Nishi-shinjuku":[35.69452,139.69256],
+  "Nishi-shinjuku-gochome":[35.68989,139.68455],
+  "Nishi-sugamo":[35.74357,139.72870],
+  "Nishi-takashimadaira":[35.79196,139.64542],
+  "Nishi-waseda":[35.70781,139.70912],
+  "Nishidai":[35.78707,139.67287],
+  "Nishigahara":[35.74594,139.74226],
+  "Nogizaka":[35.66659,139.72623],
+  "Ochanomizu":[35.70043,139.76441],
+  "Ochiai":[35.71064,139.68597],
+  "Ochiai-minami-nagasaki":[35.72344,139.68339],
+  "Ogawamachi":[35.69501,139.76645],
+  "Ogikubo":[35.70417,139.61976],
+  "Oimachi":[35.60630,139.73400],
+  "Oji":[35.75447,139.73736],
+  "Oji-kamiya":[35.76529,139.73564],
+  "Ojima":[35.68975,139.83471],
+  "Okachimachi":[35.70750,139.77470],
+  "Okubo":[35.70090,139.69700],
+  "Omori":[35.58840,139.72760],
+  "Omote-sando":[35.66524,139.71215],
+  "Onarimon":[35.66077,139.75137],
+  "Osaki":[35.61970,139.72860],
+  "Oshiage":[35.70847,139.81374],
+  "Otemachi":[35.68549,139.76556],
+  "Otsuka":[35.73110,139.72820],
+  "Roppongi":[35.66345,139.73125],
+  "Roppongi-itchome":[35.66508,139.73890],
+  "Ryogoku":[35.69681,139.79747],
+  "Sakuradamon":[35.67746,139.75189],
+  "Sendagaya":[35.68120,139.71150],
+  "Sendagi":[35.72575,139.76330],
+  "Sengakuji":[35.63871,139.73999],
+  "Sengoku":[35.72777,139.74498],
+  "Senkawa":[35.73817,139.68940],
+  "Shibakoen":[35.65419,139.74985],
+  "Shibuya":[35.65927,139.70183],
+  "Shimbashi":[35.66638,139.75893],
+  "Shimo":[35.77802,139.73250],
+  "Shimosa-nakayama":[35.71400,139.94000],
+  "Shimura-sakaue":[35.77608,139.69510],
+  "Shimura-sanchome":[35.77747,139.68575],
+  "Shin-egota":[35.73258,139.67050],
+  "Shin-itabashi":[35.74877,139.71981],
+  "Shin-kiba":[35.64578,139.82661],
+  "Shin-koenji":[35.69786,139.64851],
+  "Shin-koiwa":[35.71670,139.85830],
+  "Shin-nakano":[35.69747,139.66951],
+  "Shin-ochanomizu":[35.69693,139.76545],
+  "Shin-okachimachi":[35.70701,139.78217],
+  "Shin-okubo":[35.70130,139.70050],
+  "Shin-otsuka":[35.72613,139.72935],
+  "Shin-takashimadaira":[35.79029,139.65405],
+  "Shinagawa":[35.62850,139.73870],
+  "Shinanomachi":[35.68000,139.72030],
+  "Shinjuku":[35.69045,139.69963],
+  "Shinjuku-gyoemmae":[35.68852,139.71091],
+  "Shinjuku-nishiguchi":[35.69337,139.69912],
+  "Shinjuku-sanchome":[35.69100,139.70499],
+  "Shinozaki":[35.70602,139.90380],
+  "Shintomicho":[35.67053,139.77359],
+  "Shiodome":[35.66319,139.76022],
+  "Shirokane-takanawa":[35.64321,139.73431],
+  "Shirokanedai":[35.63781,139.72593],
+  "Suehirocho":[35.70278,139.77176],
+  "Sugamo":[35.73379,139.73815],
+  "Suidobashi":[35.70346,139.75515],
+  "Suitengumae":[35.68300,139.78517],
+  "Sumiyoshi":[35.68887,139.81570],
+  "Tabata":[35.73810,139.76070],
+  "Takadanobaba":[35.71328,139.70505],
+  "Takanawa Gateway":[35.63550,139.74070],
+  "Takanawadai":[35.63175,139.73038],
+  "Takaracho":[35.67561,139.77197],
+  "Takashimadaira":[35.78891,139.66136],
+  "Takebashi":[35.69044,139.75767],
+  "Tamachi":[35.64570,139.74760],
+  "Tameike-sanno":[35.67230,139.74162],
+  "Tatsumi":[35.64578,139.81033],
+  "Tawaramachi":[35.70992,139.79031],
+  "Tochomae":[35.69061,139.69268],
+  "Todaimae":[35.71801,139.75788],
+  "Togoshi":[35.61442,139.71632],
+  "Tokyo":[35.68194,139.76480],
+  "Toranomon":[35.67016,139.75012],
+  "Toranomon Hills":[35.66731,139.74774],
+  "Toshimaen":[35.74171,139.64912],
+  "Toyocho":[35.66959,139.81768],
+  "Toyosu":[35.65515,139.79599],
+  "Tsukiji":[35.66793,139.77247],
+  "Tsukijishijo":[35.66492,139.76693],
+  "Tsukishima":[35.66423,139.78416],
+  "Uchisaiwaicho":[35.66934,139.75533],
+  "Ueno":[35.71170,139.77634],
+  "Ueno-hirokoji":[35.70777,139.77301],
+  "Ueno-okachimachi":[35.70795,139.77335],
+  "Uguisudani":[35.72080,139.77780],
+  "Urayasu":[35.66590,139.89324],
+  "Ushigome-kagurazaka":[35.70091,139.73589],
+  "Ushigome-yanagicho":[35.69950,139.72504],
+  "Wakamatsu-kawada":[35.69919,139.71804],
+  "Wakoshi":[35.78835,139.61286],
+  "Waseda":[35.70568,139.72219],
+  "Yotsuya":[35.68514,139.72986],
+  "Yotsuya-sanchome":[35.68783,139.71932],
+  "Yoyogi":[35.68350,139.70160],
+  "Yoyogi-koen":[35.66910,139.68979],
+  "Yoyogi-uehara":[35.66902,139.67988],
+  "Yurakucho":[35.67597,139.76229],
+  "Yushima":[35.70681,139.76998],
+  "Zoshigaya":[35.72020,139.71472]
+};
+
+</script>
+<script>
+/* === inlined js/engine.js === */
+/* =========================================================
+ * Norikae routing engine
+ * Graph: nodes are (station, line) pairs + a hub per station.
+ * Dijkstra with pluggable edge weights -> route candidates,
+ * then exact fare evaluation incl. teiki (commuter pass) logic.
+ * Works in browser (window.Engine) and Node (module.exports).
+ * ========================================================= */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Engine = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+
+  function buildGraph(NET) {
+    const stations = new Map();          // name -> {name, lines:Set}
+    const rideEdges = [];                // {a, b, line, min, km}
+    const lineById = new Map();
+
+    for (const L of NET.LINES) {
+      lineById.set(L.id, L);
+      for (const s of L.stations) {
+        if (!stations.has(s)) stations.set(s, { name: s, lines: new Set() });
+        stations.get(s).lines.add(L.id);
+      }
+      const seq = L.stations;
+      for (let i = 0; i + 1 < seq.length; i++) {
+        if (seq[i] === seq[i + 1]) continue;
+        rideEdges.push({ a: seq[i], b: seq[i + 1], line: L.id, min: L.minPerHop, km: L.kmPerHop });
+      }
+      if (L.loop && seq.length > 2) {
+        rideEdges.push({ a: seq[seq.length - 1], b: seq[0], line: L.id, min: L.minPerHop, km: L.kmPerHop });
+      }
+    }
+
+    // adjacency: key "station|line"
+    const adj = new Map();
+    const addAdj = (k, e) => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(e); };
+
+    for (const e of rideEdges) {
+      addAdj(e.a + "|" + e.line,
+        { to: e.b + "|" + e.line, type: "ride", line: e.line, min: e.min, km: e.km, from: e.a, dest: e.b });
+      addAdj(e.b + "|" + e.line,
+        { to: e.a + "|" + e.line, type: "ride", line: e.line, min: e.min, km: e.km, from: e.b, dest: e.a });
+    }
+
+    // transfers within a station between lines
+    for (const st of stations.values()) {
+      const ls = [...st.lines];
+      for (let i = 0; i < ls.length; i++) for (let j = 0; j < ls.length; j++) {
+        if (i === j) continue;
+        const opA = lineById.get(ls[i]).operator, opB = lineById.get(ls[j]).operator;
+        const min = (opA === opB) ? NET.TRANSFER_DEFAULT : NET.TRANSFER_CROSS_OP;
+        addAdj(st.name + "|" + ls[i],
+          { to: st.name + "|" + ls[j], type: "transfer", min, from: st.name, dest: st.name, line: ls[j] });
+      }
+    }
+
+    // walk links between different station complexes
+    for (const [a, b, min] of NET.WALKS) {
+      if (!stations.has(a) || !stations.has(b)) continue;
+      for (const la of stations.get(a).lines) for (const lb of stations.get(b).lines) {
+        addAdj(a + "|" + la, { to: b + "|" + lb, type: "walk", min: min + 1, from: a, dest: b, line: lb });
+        addAdj(b + "|" + lb, { to: a + "|" + la, type: "walk", min: min + 1, from: b, dest: a, line: la });
+      }
+    }
+
+    return { stations, adj, lineById, NET };
+  }
+
+  // ---- teiki helpers ----
+  // teiki = {line: "E", from: "Ushigome-yanagicho", to: "Hongo-sanchome"} or null
+  // Coverage is the actual shortest path along the line's track (BFS on that
+  // line's edges), which is correct for duplicated stations (Oedo's Tochomae)
+  // and loop lines (Yamanote): only one arc is covered, not an index range.
+  function teikiPath(G, teiki) {
+    if (!teiki) return null;
+    const L = G.lineById.get(teiki.line);
+    if (!L) return null;
+    const seq = L.stations, adj = new Map();
+    const add = (a, b) => { if (a === b) return;
+      if (!adj.has(a)) adj.set(a, new Set()); adj.get(a).add(b); };
+    for (let i = 0; i + 1 < seq.length; i++) { add(seq[i], seq[i + 1]); add(seq[i + 1], seq[i]); }
+    if (L.loop && seq.length > 2) { add(seq[seq.length - 1], seq[0]); add(seq[0], seq[seq.length - 1]); }
+    if (!adj.has(teiki.from)) return null;
+    const prev = new Map([[teiki.from, null]]);
+    const q = [teiki.from];
+    while (q.length) {
+      const u = q.shift();
+      if (u === teiki.to) break;
+      for (const v of (adj.get(u) || [])) if (!prev.has(v)) { prev.set(v, u); q.push(v); }
+    }
+    if (!prev.has(teiki.to)) return null;
+    const path = [];
+    for (let c = teiki.to; c !== null; c = prev.get(c)) path.unshift(c);
+    return path;
+  }
+  function teikiStations(G, teiki) { return new Set(teikiPath(G, teiki) || []); }
+  function teikiPairs(G, teiki) {
+    const p = teikiPath(G, teiki), s = new Set();
+    if (p) for (let i = 0; i + 1 < p.length; i++) s.add([p[i], p[i + 1]].sort().join(">"));
+    return s;
+  }
+  function hopCovered(teiki, pairSet, edge) {
+    return !!teiki && edge.type === "ride" && edge.line === teiki.line &&
+      pairSet.has([edge.from, edge.dest].sort().join(">"));
+  }
+
+  // ---- Dijkstra with pluggable weight ----
+  function dijkstra(G, origin, dest, weightFn) {
+    const dist = new Map(), prev = new Map();
+    const pq = [];  // simple binary heap
+    const push = (k, d) => { pq.push([d, k]); let i = pq.length - 1;
+      while (i > 0) { const p = (i - 1) >> 1; if (pq[p][0] <= pq[i][0]) break; [pq[p], pq[i]] = [pq[i], pq[p]]; i = p; } };
+    const pop = () => { const t = pq[0], l = pq.pop(); if (pq.length) { pq[0] = l; let i = 0;
+      for (;;) { const a = 2*i+1, b = 2*i+2; let m = i;
+        if (a < pq.length && pq[a][0] < pq[m][0]) m = a;
+        if (b < pq.length && pq[b][0] < pq[m][0]) m = b;
+        if (m === i) break; [pq[m], pq[i]] = [pq[i], pq[m]]; i = m; } } return t; };
+
+    const starts = [];
+    for (const l of (G.stations.get(origin)?.lines || [])) starts.push(origin + "|" + l);
+    for (const k of starts) { dist.set(k, G.NET.BOARD_ACCESS); push(k, G.NET.BOARD_ACCESS); }
+
+    const goal = new Set([...(G.stations.get(dest)?.lines || [])].map(l => dest + "|" + l));
+    let best = null;
+
+    while (pq.length) {
+      const [d, u] = pop();
+      if (d !== dist.get(u)) continue;
+      if (goal.has(u)) { best = u; break; }
+      for (const e of (G.adj.get(u) || [])) {
+        const w = weightFn(e, u);
+        if (w == null) continue;
+        const nd = d + w;
+        if (nd < (dist.get(e.to) ?? Infinity)) { dist.set(e.to, nd); prev.set(e.to, { u, e }); push(e.to, nd); }
+      }
+    }
+    if (!best) return null;
+
+    const edges = [];
+    let cur = best;
+    while (prev.has(cur)) { const { u, e } = prev.get(cur); edges.unshift(e); cur = u; }
+    return edges;
+  }
+
+  // ---- collapse edge list into legs ----
+  function toLegs(G, edges) {
+    const legs = [];
+    for (const e of edges) {
+      const last = legs[legs.length - 1];
+      if (e.type === "ride" && last && last.type === "ride" && last.line === e.line) {
+        last.stations.push(e.dest); last.min += e.min; last.km += e.km; last.hops.push(e);
+      } else if (e.type === "ride") {
+        legs.push({ type: "ride", line: e.line, stations: [e.from, e.dest], min: e.min, km: e.km, hops: [e] });
+      } else {
+        // merge consecutive transfer/walk; remember if any hop was a walk
+        // (a walk means leaving the paid area -> fare gate reset)
+        if (last && last.type !== "ride") { last.min += e.min; last.dest = e.dest; last.hasWalk = last.hasWalk || e.type === "walk"; }
+        else legs.push({ type: e.type, from: e.from, dest: e.dest, min: e.min, hasWalk: e.type === "walk" });
+      }
+    }
+    return legs.filter(l => l.type === "ride" || l.from !== l.dest || l.min > 0);
+  }
+
+  // ---- fare evaluation ----
+  function fareForKm(NET, operator, km) {
+    if (km <= 0) return 0;
+    for (const [maxKm, yen] of NET.FARES[operator]) if (km <= maxKm) return yen;
+    return NET.FARES[operator][NET.FARES[operator].length - 1][1];
+  }
+
+  // Split ride legs into operator runs; inside a run apply teiki split rule:
+  // pay fare(before-covered km) + fare(after-covered km)
+  function evaluateFare(G, legs, teiki) {
+    const NET = G.NET;
+    const tPairs = teikiPairs(G, teiki);
+    const runs = [];   // {operator, before: km, after: km, sawCovered, ops:Set}
+    let cur = null;
+    const subwayOps = new Set(["metro", "toei"]);
+
+    for (const leg of legs) {
+      if (leg.type !== "ride") {
+        if (leg.hasWalk) { cur = null; } // leaving the paid area
+        continue;
+      }
+      const op = G.lineById.get(leg.line).operator;
+      const joinable = cur && (cur.op === op ||
+        (subwayOps.has(cur.op) && subwayOps.has(op)));   // metro<->toei joint journey
+      if (!joinable) { cur = { op, segs: [], opsUsed: new Set() }; runs.push(cur); }
+      cur.op = op;
+      cur.opsUsed.add(op);
+      for (const hop of leg.hops) {
+        cur.segs.push({ km: hop.km, op, covered: hopCovered(teiki, tPairs, hop) });
+      }
+    }
+
+    // returns fare; counts multi-operator buckets via `ctx` so the
+    // Metro<->Toei discount is applied at most once per physical journey
+    const bucketFare = (bucket, ctx) => {
+      const ops = Object.keys(bucket);
+      if (!ops.length) return 0;
+      let f = 0;
+      for (const op of ops) f += fareForKm(G.NET, op, bucket[op]);
+      if (ops.length > 1 && ctx.discounts++ === 0) f -= NET.METRO_TOEI_DISCOUNT;
+      return f;
+    };
+
+    let total = 0, coveredAny = false, fullCovered = legs.some(l => l.type === "ride");
+    for (const run of runs) {
+      // Split rule: pay fare(entry->pass start) + fare(pass end->exit).
+      // phases: before covered span / covered / after covered span
+      let phase = 0, runCovered = false;
+      const km = { before: {}, after: {}, all: {} };
+      for (const s of run.segs) {
+        km.all[s.op] = (km.all[s.op] || 0) + s.km;
+        if (s.covered) { phase = 1; runCovered = true; continue; }
+        if (phase === 1) phase = 2;
+        const bucket = phase === 0 ? km.before : km.after;
+        bucket[s.op] = (bucket[s.op] || 0) + s.km;
+        fullCovered = false;
+      }
+      if (!runCovered) { total += bucketFare(km.all, { discounts: 0 }); fullCovered = false; continue; }
+      // Charge the cheaper of split-at-pass vs plain through fare (IC behavior)
+      const sctx = { discounts: 0 };
+      const split = bucketFare(km.before, sctx) + bucketFare(km.after, sctx);
+      const plain = bucketFare(km.all, { discounts: 0 });
+      if (split <= plain) { total += split; coveredAny = true; }
+      else { total += plain; fullCovered = false; }
+    }
+    if (!legs.some(l => l.type === "ride")) fullCovered = false;
+    return { fare: total, coveredByPass: coveredAny, freeWithPass: fullCovered && coveredAny };
+  }
+
+  function summarize(G, edges, teiki) {
+    if (!edges) return null;
+    const legs = toLegs(G, edges);
+    const rideLegs = legs.filter(l => l.type === "ride");
+    const minutes = G.NET.BOARD_ACCESS + edges.reduce((s, e) => s + e.min, 0);
+    const transfers = Math.max(0, rideLegs.length - 1);
+    const fareNoPass = evaluateFare(G, legs, null);
+    const farePass = evaluateFare(G, legs, teiki);
+    const key = rideLegs.map(l => l.line + ":" + l.stations[0] + ">" + l.stations[l.stations.length - 1]).join("__");
+    return { legs, minutes: Math.round(minutes), transfers,
+      fare: farePass.fare, fareWithoutPass: fareNoPass.fare,
+      coveredByPass: farePass.coveredByPass, freeWithPass: farePass.freeWithPass, key };
+  }
+
+  // ---- public search ----
+  let _gCache = null;
+  function graphFor(NETDATA) {
+    if (_gCache && _gCache.NET === NETDATA) return _gCache;
+    _gCache = buildGraph(NETDATA);
+    return _gCache;
+  }
+  function search(NETDATA, origin, dest, teiki) {
+    const G = graphFor(NETDATA);
+    if (!G.stations.has(origin) || !G.stations.has(dest)) return { error: "unknown-station" };
+    if (origin === dest) return { error: "same-station" };
+    const tPairs = teikiPairs(G, teiki);
+
+    const fareBias = (usePass) => (e) => {
+      if (e.type !== "ride") return e.min + 6;
+      if (usePass && hopCovered(teiki, tPairs, e)) return e.min * 0.25; // pass = free, strongly prefer
+      const op = G.lineById.get(e.line).operator;
+      const yenPerKm = op === "jr" ? 16 : 22;
+      return e.min + e.km * yenPerKm / 8;                             // fare-biased
+    };
+    const weights = {
+      w1: (e) => e.min,                                    // pure time
+      w2: (e) => e.min + (e.type !== "ride" ? 14 : 0),     // transfer-averse
+      w3: fareBias(true),                                  // cheap, exploiting pass
+      w4: fareBias(false)                                  // cheap, ignoring pass
+    };
+
+    const routes = [];
+    const seen = new Set();
+    for (const w of Object.values(weights)) {
+      const edges = dijkstra(G, origin, dest, w);
+      const s = summarize(G, edges, teiki);
+      if (!s || seen.has(s.key)) continue;
+      seen.add(s.key);
+      routes.push({ ...s, flavors: [] });
+    }
+    // Badge from actual computed metrics, not the search heuristic
+    if (routes.length) {
+      const by = (fn) => routes.reduce((a, b) => (fn(b) < fn(a) ? b : a));
+      by(r => r.minutes).flavors.push("fastest");
+      by(r => r.fare * 10000 + r.minutes).flavors.push("cheapest");
+      by(r => r.transfers * 10000 + r.minutes).flavors.push("easiest");
+    }
+    routes.sort((a, b) => a.minutes - b.minutes);
+    return { routes, graph: G };
+  }
+
+  return { buildGraph, graphFor, search, teikiStations, teikiPath, teikiPairs, evaluateFare, dijkstra, toLegs, summarize };
+});
+
+</script>
+<script>
+/* === inlined js/geo.js === */
+/* =========================================================
+ * Norikae geo module
+ * - resolves full station coordinate table (anchors +
+ *   per-line interpolation for un-anchored stations)
+ * - haversine / nearest stations / walk-time model
+ * Browser (window.Geo) and Node (module.exports).
+ * ========================================================= */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Geo = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+
+  const R = 6371000;
+  const rad = (d) => d * Math.PI / 180;
+  function distM(a, b) {
+    const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
+    const h = Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  // Walking: 80 m/min on a 1.3x path-length factor
+  const walkMin = (meters) => Math.max(1, Math.round(meters * 1.3 / 80));
+
+  /**
+   * Build {stationName: [lat,lon]} for every station in NET.
+   * Missing stations are linearly interpolated between the nearest
+   * anchored stations on the same line (repeat passes handle chains).
+   */
+  function resolveCoords(NET, ANCHORS) {
+    const coords = { ...ANCHORS };
+    for (let pass = 0; pass < 6; pass++) {
+      let changed = false;
+      for (const L of NET.LINES) {
+        const seq = L.stations;
+        for (let i = 0; i < seq.length; i++) {
+          if (coords[seq[i]]) continue;
+          // nearest known neighbor on each side
+          let lo = i - 1; while (lo >= 0 && !coords[seq[lo]]) lo--;
+          let hi = i + 1; while (hi < seq.length && !coords[seq[hi]]) hi++;
+          if (lo >= 0 && hi < seq.length) {
+            const t = (i - lo) / (hi - lo);
+            const A = coords[seq[lo]], B = coords[seq[hi]];
+            coords[seq[i]] = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t];
+            changed = true;
+          }
+        }
+      }
+      if (!changed) break;
+    }
+    return coords;
+  }
+
+  function nearestStations(coords, lat, lon, k = 3, maxM = 1800) {
+    const out = [];
+    for (const [name, c] of Object.entries(coords)) {
+      out.push({ name, meters: Math.round(distM([lat, lon], c)) });
+    }
+    out.sort((a, b) => a.meters - b.meters);
+    // No bogus fallback: a place far outside the network returns [] so the
+    // app can show a proper "outside covered area" message instead of
+    // "walk 320 min to Kamata".
+    return out.filter(s => s.meters <= maxM).slice(0, k);
+  }
+
+  // ---------- geocoding (browser only; needs fetch + network) ----------
+  const TOKYO = { lat: 35.6895, lon: 139.7550 };
+  // Consistent accept box for both providers (Greater Tokyo core)
+  const BOX = { s: 35.45, n: 36.00, w: 139.30, e: 140.15 };
+
+  // small LRU cache so backspace/retype doesn't re-hit the geocoders
+  const _cache = new Map();
+  const CACHE_MAX = 40;
+  function cachePut(k, v) {
+    if (_cache.has(k)) _cache.delete(k);
+    _cache.set(k, v);
+    if (_cache.size > CACHE_MAX) _cache.delete(_cache.keys().next().value);
+  }
+
+  /**
+   * Returns {results: [...], error: bool}.
+   * error=true means both providers were unreachable (likely offline) —
+   * distinct from a successful search with no matches.
+   */
+  async function geocode(q, limit = 5) {
+    const key = q.toLowerCase();
+    if (_cache.has(key)) return _cache.get(key);
+    let reachable = false;
+
+    // Photon (komoot) — CORS-friendly, typeahead-grade
+    try {
+      const u = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${limit}` +
+                `&lat=${TOKYO.lat}&lon=${TOKYO.lon}&lang=en`;
+      const r = await fetch(u);
+      if (r.ok) {
+        reachable = true;
+        const j = await r.json();
+        const feats = (j.features || []).map(f => ({
+          name: [f.properties.name, f.properties.district || f.properties.city]
+                  .filter(Boolean).join(", "),
+          lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+          kind: f.properties.osm_value || "place"
+        })).filter(p => p.lat > BOX.s && p.lat < BOX.n && p.lon > BOX.w && p.lon < BOX.e);
+        if (feats.length) { const out = { results: feats, error: false }; cachePut(key, out); return out; }
+      }
+    } catch (e) { /* fall through */ }
+
+    // Nominatim fallback (same box; kept as fallback only, per usage policy)
+    try {
+      const u = `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}` +
+                `&viewbox=${BOX.w},${BOX.s},${BOX.e},${BOX.n}&bounded=1&q=${encodeURIComponent(q)}`;
+      const r = await fetch(u, { headers: { "Accept-Language": "en" } });
+      if (r.ok) {
+        reachable = true;
+        const j = await r.json();
+        const out = { results: j.map(p => ({ name: p.display_name.split(",").slice(0, 2).join(","),
+          lat: +p.lat, lon: +p.lon, kind: p.type })), error: false };
+        cachePut(key, out);
+        return out;
+      }
+    } catch (e) { /* offline */ }
+
+    return { results: [], error: !reachable };
+  }
+
+  return { distM, walkMin, resolveCoords, nearestStations, geocode };
+});
+
+</script>
+<script>
+/* === inlined js/odpt.js === */
+/* =========================================================
+ * Norikae — ODPT live-data module
+ * Talks to the Public Transportation Open Data platform
+ * (odpt.org) for station ids, timetables and train info.
+ * Works in browser (window.ODPT) and Node (module.exports).
+ * ========================================================= */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.ODPT = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+
+  const BASE = "https://api.odpt.org/api/v4";
+
+  // Our line id -> {operator, railway} on the ODPT side.
+  const RAILWAYS = {
+    E: { operator: "Toei", railway: "Toei.Oedo" },
+    I: { operator: "Toei", railway: "Toei.Mita" },
+    S: { operator: "Toei", railway: "Toei.Shinjuku" },
+    A: { operator: "Toei", railway: "Toei.Asakusa" },
+    G: { operator: "TokyoMetro", railway: "TokyoMetro.Ginza" },
+    M: { operator: "TokyoMetro", railway: "TokyoMetro.Marunouchi" },
+    H: { operator: "TokyoMetro", railway: "TokyoMetro.Hibiya" },
+    T: { operator: "TokyoMetro", railway: "TokyoMetro.Tozai" },
+    C: { operator: "TokyoMetro", railway: "TokyoMetro.Chiyoda" },
+    Y: { operator: "TokyoMetro", railway: "TokyoMetro.Yurakucho" },
+    Z: { operator: "TokyoMetro", railway: "TokyoMetro.Hanzomon" },
+    N: { operator: "TokyoMetro", railway: "TokyoMetro.Namboku" },
+    F: { operator: "TokyoMetro", railway: "TokyoMetro.Fukutoshin" },
+    JY: { operator: "JR-East", railway: "JR-East.Yamanote" },
+    JB: { operator: "JR-East", railway: "JR-East.ChuoSobuLocal" },
+    JC: { operator: "JR-East", railway: "JR-East.ChuoRapid" },
+    JK: { operator: "JR-East", railway: "JR-East.KeihinTohokuNegishi" }
+  };
+
+  // "Ushigome-yanagicho" -> "UshigomeYanagicho", "Toranomon Hills" -> "ToranomonHills"
+  function camelize(name) {
+    return name.split(/[-\s]+/)
+      .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+      .join("");
+  }
+
+  // odpt.Station:<operator>.<railway>.<StationName>
+  function stationId(lineId, stationName) {
+    const R = RAILWAYS[lineId];
+    if (!R) return null;
+    return `odpt.Station:${R.railway}.${camelize(stationName)}`;
+  }
+
+  // Weekday vs SaturdayHoliday, based on the calendar date in Asia/Tokyo.
+  // Public holidays are not modeled — a known limitation.
+  function calendarFor(date) {
+    const jst = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+    const day = jst.getDay(); // 0 = Sun, 6 = Sat
+    return (day === 0 || day === 6) ? "odpt.Calendar:SaturdayHoliday" : "odpt.Calendar:Weekday";
+  }
+
+  // ---- tiny cache helpers (localStorage in browser, Map fallback in Node) ----
+  const _memCache = new Map();
+  function cacheGet(key) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      }
+    } catch (e) { /* fall through to mem cache */ }
+    return _memCache.get(key) || null;
+  }
+  function cachePut(key, value) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(key, JSON.stringify(value));
+        return;
+      }
+    } catch (e) { /* fall through to mem cache */ }
+    _memCache.set(key, value);
+  }
+
+  const ST_TTL_MS = 20 * 60 * 60 * 1000;   // station timetable: 20 hours
+  const TI_TTL_MS = 60 * 1000;             // train information: 60 seconds
+
+  // last segment after the final "." — e.g. "odpt.RailDirection:TokyoMetro.Ogikubo" -> "Ogikubo"
+  function lastSegment(id) {
+    if (!id) return null;
+    const i = id.lastIndexOf(".");
+    return i === -1 ? id : id.slice(i + 1);
+  }
+
+  // Find the index of a station name on a line's station array, matching
+  // camelized names case-insensitively; returns -1 if not found.
+  function indexOnLine(stations, name) {
+    const target = camelize(name).toLowerCase();
+    for (let i = 0; i < stations.length; i++) {
+      if (camelize(stations[i]).toLowerCase() === target) return i;
+    }
+    return -1;
+  }
+
+  // Resolve which direction (terminus name) a timetable object serves, and
+  // decide whether that direction matches travelling from `station` toward
+  // `toward` on our line's station sequence. Returns true/false/null
+  // (null = unresolvable, e.g. loop lines or JR Inbound/Outbound labels).
+  function directionMatches(obj, stations, iStation, iToward) {
+    const wantSign = Math.sign(iToward - iStation);
+    if (wantSign === 0) return null;
+
+    // (a) odpt:railDirection suffix as a terminus name
+    const dirName = lastSegment(obj["odpt:railDirection"]);
+    if (dirName) {
+      const iTerm = indexOnLine(stations, dirName);
+      if (iTerm !== -1) {
+        return Math.sign(iTerm - iStation) === wantSign;
+      }
+    }
+
+    // (b) fall back to the first few destinationStation entries
+    const objs = obj["odpt:stationTimetableObject"] || [];
+    for (let k = 0; k < Math.min(3, objs.length); k++) {
+      const dests = objs[k]["odpt:destinationStation"] || [];
+      for (const d of dests) {
+        const iDest = indexOnLine(stations, lastSegment(d));
+        if (iDest !== -1) return Math.sign(iDest - iStation) === wantSign;
+      }
+    }
+
+    return null; // unresolvable
+  }
+
+  // "HH:MM" -> minutes since 3am, treating the transit day as starting at 3am
+  // so "24:10" (which really means 00:10 the next service day) sorts after
+  // "23:50" instead of wrapping around to before "03:00".
+  function minutesSince3am(hhmm) {
+    const [h, m] = hhmm.split(":").map(Number);
+    let mins = h * 60 + m;
+    mins -= 3 * 60;
+    if (mins < 0) mins += 24 * 60; // e.g. "01:30" -> belongs to previous day's late night
+    return mins;
+  }
+
+  async function nextDepartures({ key, net, lineId, station, toward, count = 3, now = new Date(), fetchFn = fetch }) {
+    try {
+      const sid = stationId(lineId, station);
+      if (!sid) return null;
+      const calendar = calendarFor(now);
+      const cacheKey = `norikae:st:${sid}:${calendar}`;
+
+      let timetables;
+      const cached = cacheGet(cacheKey);
+      if (cached && (Date.now() - cached.t) < ST_TTL_MS) {
+        timetables = cached.data;
+      } else {
+        const url = `${BASE}/odpt:StationTimetable?odpt:station=${encodeURIComponent(sid)}&acl:consumerKey=${encodeURIComponent(key)}`;
+        const res = await fetchFn(url);
+        if (!res || !res.ok) return null;
+        timetables = await res.json();
+        cachePut(cacheKey, { t: Date.now(), data: timetables });
+      }
+      if (!Array.isArray(timetables)) return null;
+
+      // Filter to timetables matching the calendar.
+      const byCalendar = timetables.filter(t => t["odpt:calendar"] === calendar);
+      if (!byCalendar.length) return null;
+
+      const R = RAILWAYS[lineId];
+      const line = net && net.LINES ? net.LINES.find(L => L.id === lineId) : null;
+      if (!R || !line) return null;
+      const stations = line.stations;
+      const iStation = indexOnLine(stations, station);
+      const iToward = indexOnLine(stations, toward);
+      if (iStation === -1 || iToward === -1) return null;
+
+      // Find the (first) timetable object whose direction matches travel toward `toward`.
+      let matched = null;
+      for (const t of byCalendar) {
+        const m = directionMatches(t, stations, iStation, iToward);
+        if (m === true) { matched = t; break; }
+        if (m === null) continue; // keep looking, but remember unresolvable case below
+      }
+      if (!matched) {
+        // If every candidate was unresolvable (loop lines, JR Inbound/Outbound), bail to null.
+        return null;
+      }
+
+      const nowJst = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+      const nowKey = minutesSince3am(
+        `${String(nowJst.getHours()).padStart(2, "0")}:${String(nowJst.getMinutes()).padStart(2, "0")}`
+      );
+
+      const entries = matched["odpt:stationTimetableObject"] || [];
+      const times = entries
+        .map(e => e["odpt:departureTime"])
+        .filter(Boolean)
+        .filter(t => minutesSince3am(t) > nowKey)
+        .sort((a, b) => minutesSince3am(a) - minutesSince3am(b));
+
+      return times.slice(0, count);
+    } catch (e) {
+      return null; // never throw
+    }
+  }
+
+  // ---- train information (service disruptions) ----
+  let _tiCache = null; // {t, data} in-module cache
+  const TI_CACHE_KEY = "norikae:ti";
+
+  async function trainInfo({ key, fetchFn = fetch }) {
+    try {
+      if (_tiCache && (Date.now() - _tiCache.t) < TI_TTL_MS) {
+        return _tiCache.data;
+      }
+      const stored = cacheGet(TI_CACHE_KEY);
+      if (stored && (Date.now() - stored.t) < TI_TTL_MS) {
+        _tiCache = stored;
+        return stored.data;
+      }
+
+      const operators = "odpt.Operator:TokyoMetro,odpt.Operator:Toei,odpt.Operator:JR-East";
+      const url = `${BASE}/odpt:TrainInformation?odpt:operator=${operators}&acl:consumerKey=${encodeURIComponent(key)}`;
+      const res = await fetchFn(url);
+      if (!res || !res.ok) return { ok: false, issues: [] };
+      const list = await res.json();
+      if (!Array.isArray(list)) return { ok: false, issues: [] };
+
+      // Reverse lookup from ODPT railway string back to our lineId.
+      const railwayToLineId = new Map();
+      for (const [id, R] of Object.entries(RAILWAYS)) railwayToLineId.set(R.railway, id);
+
+      const issues = [];
+      for (const item of list) {
+        const textObj = item["odpt:trainInformationText"] || {};
+        const text = textObj.en || textObj.ja;
+        if (!text) continue;
+        if (/normal|平常/i.test(text)) continue; // not an issue
+
+        const railway = item["odpt:railway"] || "";
+        const railwaySuffix = railway.startsWith("odpt.Railway:") ? railway.slice("odpt.Railway:".length) : railway;
+        const lineId = railwayToLineId.get(railwaySuffix) || null;
+
+        issues.push({ lineId, railway: railwaySuffix, text });
+      }
+
+      const data = { ok: true, issues };
+      _tiCache = { t: Date.now(), data };
+      cachePut(TI_CACHE_KEY, _tiCache);
+      return data;
+    } catch (e) {
+      return { ok: false, issues: [] };
+    }
+  }
+
+  return { stationId, calendarFor, nextDepartures, trainInfo, RAILWAYS, camelize };
+});
+
+// ---- inline Node self-test ----
+if (typeof require !== "undefined" && require.main === module) {
+  const ODPT = module.exports;
+  let fails = 0;
+  const check = (name, cond, extra = "") => {
+    console.log((cond ? "  ✅ " : "  ❌ ") + name + (extra ? `  (${extra})` : ""));
+    if (!cond) fails++;
+  };
+
+  console.log("stationId:");
+  check("Oedo Ushigome-yanagicho",
+    ODPT.stationId("E", "Ushigome-yanagicho") === "odpt.Station:Toei.Oedo.UshigomeYanagicho",
+    ODPT.stationId("E", "Ushigome-yanagicho"));
+  check("Hibiya Toranomon Hills",
+    ODPT.stationId("H", "Toranomon Hills") === "odpt.Station:TokyoMetro.Hibiya.ToranomonHills",
+    ODPT.stationId("H", "Toranomon Hills"));
+  check("Chiyoda Meiji-jingumae",
+    ODPT.stationId("C", "Meiji-jingumae") === "odpt.Station:TokyoMetro.Chiyoda.MeijiJingumae",
+    ODPT.stationId("C", "Meiji-jingumae"));
+  check("Yamanote Tokyo",
+    ODPT.stationId("JY", "Tokyo") === "odpt.Station:JR-East.Yamanote.Tokyo",
+    ODPT.stationId("JY", "Tokyo"));
+  check("unknown line -> null", ODPT.stationId("XX", "Tokyo") === null);
+
+  console.log("\ncalendarFor:");
+  // 2026-07-06 is a Monday (Weekday); 2026-07-11 is a Saturday (SaturdayHoliday)
+  check("Mon 2026-07-06 -> Weekday",
+    ODPT.calendarFor(new Date("2026-07-06T12:00:00+09:00")) === "odpt.Calendar:Weekday");
+  check("Sat 2026-07-11 -> SaturdayHoliday",
+    ODPT.calendarFor(new Date("2026-07-11T12:00:00+09:00")) === "odpt.Calendar:SaturdayHoliday");
+  check("Sun 2026-07-12 -> SaturdayHoliday",
+    ODPT.calendarFor(new Date("2026-07-12T12:00:00+09:00")) === "odpt.Calendar:SaturdayHoliday");
+
+  console.log(fails ? `\n${fails} FAILURES` : "\nAll tests passed");
+  process.exit(fails ? 1 : 0);
+}
+
+</script>
+<script>
+/* =========================================================
+ * Norikae UI
+ * Section map:
+ *   1. Setup / store / helpers
+ *   2. Endpoint + teiki state
+ *   3. Autocomplete + recents dropdown
+ *   4. Location / swap
+ *   5. Dialogs (teiki, settings)
+ *   6. Search
+ *   7. Time helpers
+ *   8. Render results
+ *   9. Map
+ *  10. ODPT: scheduled departures + delays
+ * ========================================================= */
+
+// ---------- 1. Setup / store / helpers ----------
+const NET = window.NETWORK;
+const $ = (s) => document.querySelector(s);
+
+const store = {
+  get: (k, d) => {
+    try {
+      const raw = localStorage.getItem("norikae:" + k);
+      return raw === null ? d : JSON.parse(raw);
+    } catch { return d; }
+  },
+  set: (k, v) => localStorage.setItem("norikae:" + k, JSON.stringify(v))
+};
+
+// esc() — escape any remote / user string before innerHTML use (item 11)
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// Asia/Tokyo clock formatting (item 12)
+const tzFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
+const fmt = (d) => tzFmt.format(d);
+
+// item 30: build graph once at startup
+const G0 = Engine.graphFor(NET);
+const allStations = [...G0.stations.keys()].sort();
+const COORDS = Geo.resolveCoords(NET, window.STATION_ANCHORS);
+
+// ---------- 2. endpoint + teiki state ----------
+// endpoint: {type:'station', name} | {type:'place', name, lat, lon}
+const endpoint = { from: null, to: null };
+
+// teiki defaults to null — no hardcoded demo pass (item 2)
+let teiki = store.get("teiki", null);
+function renderTeiki() {
+  const L = teiki && NET.LINES.find(l => l.id === teiki.line);
+  $("#teikiLabel").textContent = teiki ? `${teiki.from} ⇄ ${teiki.to} (${L ? L.name : teiki.line})` : "Set up your commuter pass";
+}
+renderTeiki();
+
+// Home / Work endpoints (item 16)
+let homeEP = store.get("home", null);   // endpoint object or null
+let workEP = store.get("work", null);
+
+// Recent searches (item 15): [{from:endpoint, to:endpoint}], newest first, max 8
+let recents = store.get("recents", []);
+function pushRecent(fromEP, toEP) {
+  if (!fromEP || !toEP) return;
+  const key = JSON.stringify([fromEP, toEP]);
+  recents = recents.filter(r => JSON.stringify([r.from, r.to]) !== key);
+  recents.unshift({ from: fromEP, to: toEP });
+  recents = recents.slice(0, 8);
+  store.set("recents", recents);
+}
+function epLabel(ep) { return ep ? ep.name : ""; }
+
+// ---------- 3. Autocomplete + recents dropdown ----------
+function setupAuto(inputId, ddId, key, otherKey) {
+  const inp = $(inputId), dd = $(ddId);
+  let timer = null, seq = 0, hlIndex = -1, geocoding = false;
+
+  function closeDD() {
+    dd.style.display = "none";
+    inp.setAttribute("aria-expanded", "false");
+    inp.removeAttribute("aria-activedescendant");
+    hlIndex = -1;
+  }
+
+  function choose(item, autoSearch) {
+    endpoint[key] = item;
+    inp.value = item.name;
+    closeDD();
+    inp.dataset.ok = "1";
+    if (autoSearch) { doSearch(); }
+  }
+
+  function itemEls() { return [...dd.querySelectorAll(".item[data-idx]")]; }
+
+  function applyHighlight() {
+    const els = itemEls();
+    els.forEach((el, i) => el.classList.toggle("hl", i === hlIndex));
+    if (hlIndex >= 0 && els[hlIndex]) {
+      inp.setAttribute("aria-activedescendant", els[hlIndex].id);
+      els[hlIndex].scrollIntoView({ block: "nearest" });
+    } else {
+      inp.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  // renderable "picks" registry so keyboard Enter can dispatch by index
+  let picks = [];
+
+  function renderRecents() {
+    picks = [];
+    let html = "";
+    const rows = [];
+    if (homeEP) rows.push({ label: "🏠 Home", sub: homeEP.name, ep: homeEP, other: null, isPair: false });
+    if (workEP) rows.push({ label: "💼 Work", sub: workEP.name, ep: workEP, other: null, isPair: false });
+    for (const r of recents) rows.push({ label: `${r.from.name} → ${r.to.name}`, sub: "", pair: r, isPair: true });
+
+    if (!rows.length) {
+      dd.innerHTML = `<div class="item muted">Start typing a station, address, or place</div>`;
+      dd.style.display = "block";
+      inp.setAttribute("aria-expanded", "true");
+      return;
+    }
+    html += `<div class="sect">Recent searches</div>`;
+    rows.forEach((r, i) => {
+      const idx = picks.length;
+      picks.push({ kind: "recent", row: r, key });
+      html += `<div class="item" role="option" id="${inputId.slice(1)}-opt-${idx}" data-idx="${idx}">
+        <span class="icn">${r.isPair ? "🕐" : ""}</span><span>${esc(r.label)}</span>${r.sub ? `<span class="sub">${esc(r.sub)}</span>` : ""}
+      </div>`;
+    });
+    dd.innerHTML = html;
+    dd.style.display = "block";
+    inp.setAttribute("aria-expanded", "true");
+    wireItems();
+  }
+
+  function render(stations, placesState, places) {
+    picks = [];
+    let html = "";
+    if (stations.length) {
+      html += `<div class="sect">Stations</div>`;
+      stations.forEach(s => {
+        const idx = picks.length;
+        picks.push({ kind: "station", name: s });
+        html += `<div class="item" role="option" id="${inputId.slice(1)}-opt-${idx}" data-idx="${idx}"><span class="icn">🚉</span>${esc(s)}</div>`;
+      });
+    }
+    html += `<div class="sect">Places</div>`;
+    if (placesState === "loading") {
+      html += `<div class="item muted">Searching places…</div>`;
+    } else if (placesState === "error") {
+      html += `<div class="item muted">Place search unavailable — check your connection</div>`;
+    } else if (places && places.length) {
+      places.forEach((p, i) => {
+        const idx = picks.length;
+        picks.push({ kind: "place", place: p });
+        html += `<div class="item" role="option" id="${inputId.slice(1)}-opt-${idx}" data-idx="${idx}"><span class="icn">📍</span>${esc(p.name)}<span class="sub">${esc(p.kind || "")}</span></div>`;
+      });
+    } else if (placesState === "done") {
+      html += `<div class="item muted">No place matches</div>`;
+    }
+    if (!stations.length && placesState !== "loading" && placesState !== "error" && !(places && places.length)) {
+      dd.innerHTML = `<div class="item muted">No matches</div>`;
+    } else {
+      dd.innerHTML = html;
+    }
+    dd.style.display = "block";
+    inp.setAttribute("aria-expanded", "true");
+    wireItems();
+  }
+
+  function wireItems() {
+    hlIndex = -1;
+    dd.querySelectorAll(".item[data-idx]").forEach(el => {
+      el.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        const idx = +el.dataset.idx;
+        activate(idx, false);
+      });
+    });
+  }
+
+  function activate(idx, viaKeyboard) {
+    const pick = picks[idx];
+    if (!pick) return;
+    if (pick.kind === "station") {
+      choose({ type: "station", name: pick.name }, false);
+    } else if (pick.kind === "place") {
+      choose({ type: "place", ...pick.place }, false);
+    } else if (pick.kind === "recent") {
+      const r = pick.row;
+      if (r.isPair) {
+        endpoint.from = r.pair.from; endpoint.to = r.pair.to;
+        $("#from").value = r.pair.from.name; $("#to").value = r.pair.to.name;
+        $("#from").dataset.ok = "1"; $("#to").dataset.ok = "1";
+        closeDD();
+        doSearch();
+        return;
+      } else {
+        choose(r.ep, false);
+      }
+    }
+    // item 17: Enter picks + if other field already set, run search immediately
+    if (viaKeyboard && endpoint[otherKey]) doSearch();
+  }
+
+  inp.addEventListener("focus", () => {
+    if (inp.value.trim() === "") renderRecents();
+  });
+
+  inp.addEventListener("input", () => {
+    endpoint[key] = null; inp.dataset.ok = "";
+    const q = inp.value.trim();
+    clearTimeout(timer);
+    // item 4: bump seq on every input incl. the <2-char early return
+    const mySeq = ++seq;
+    if (q.length < 2) {
+      closeDD();
+      if (q.length === 0) renderRecents();
+      return;
+    }
+    const lq = q.toLowerCase();
+    const stations = allStations.filter(s => s.toLowerCase().includes(lq)).slice(0, 5);
+    render(stations, "loading", []);  // instant local results, places loading (item 19)
+    geocoding = true;
+    timer = setTimeout(async () => {
+      const res = await Geo.geocode(q, 5);  // item 8: {results, error}
+      if (mySeq !== seq) return;  // stale response guard
+      geocoding = false;
+      if (res.error) render(stations, "error", []);
+      else render(stations, "done", res.results);
+    }, 350);
+  });
+
+  document.addEventListener("pointerdown", (ev) => {
+    if (!dd.contains(ev.target) && ev.target !== inp) closeDD();
+  }, true);
+
+  inp.addEventListener("keydown", (e) => {
+    const els = itemEls();
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (dd.style.display === "none") { if (inp.value.trim() === "") renderRecents(); }
+      hlIndex = Math.min((els.length ? itemEls().length : 0) - 1, hlIndex + 1);
+      applyHighlight();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      hlIndex = Math.max(0, hlIndex - 1);
+      applyHighlight();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (dd.style.display !== "none" && picks.length) {
+        const idx = hlIndex >= 0 ? hlIndex : 0;
+        activate(idx, true);
+      } else {
+        doSearch();
+      }
+    } else if (e.key === "Escape") {
+      closeDD();
+    }
+  });
+}
+setupAuto("#from", "#ddFrom", "from", "to");
+setupAuto("#to", "#ddTo", "to", "from");
+
+// ---------- 4. Location / swap ----------
+$("#btnLoc").onclick = () => {
+  if (!navigator.geolocation) return showErr("Geolocation not supported by this browser.");
+  $("#btnLoc").textContent = "⏳";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      endpoint.from = { type: "place", name: "Current location", lat: pos.coords.latitude, lon: pos.coords.longitude };
+      $("#from").value = "Current location";
+      $("#from").dataset.ok = "1";
+      $("#btnLoc").textContent = "📍";
+    },
+    () => { $("#btnLoc").textContent = "📍"; showErr("Couldn't get your location — check permissions (HTTPS required)."); },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+};
+
+$("#swap").onclick = () => {
+  [endpoint.from, endpoint.to] = [endpoint.to, endpoint.from];
+  const a = $("#from").value; $("#from").value = $("#to").value; $("#to").value = a;
+  const okA = $("#from").dataset.ok; $("#from").dataset.ok = $("#to").dataset.ok; $("#to").dataset.ok = okA;
+  // item 20: re-run search after swap if results already exist
+  if (lastResults) doSearch();
+};
+
+// ---------- 5. Dialogs (teiki, settings) ----------
+const dlgT = $("#dlgTeiki");
+$("#teikiChip").onclick = () => {
+  $("#tkErr").style.display = "none";
+  const sel = $("#tkLine");
+  sel.innerHTML = NET.LINES.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
+  sel.value = teiki?.line || NET.LINES[0].id;
+  fillTkStations();
+  if (teiki) { $("#tkFrom").value = teiki.from; $("#tkTo").value = teiki.to; }
+  dlgT.showModal();
+};
+function fillTkStations() {
+  const L = NET.LINES.find(l => l.id === $("#tkLine").value);
+  const opts = [...new Set(L.stations)].map(s => `<option>${esc(s)}</option>`).join("");
+  $("#tkFrom").innerHTML = opts; $("#tkTo").innerHTML = opts;
+}
+$("#tkLine").onchange = fillTkStations;
+$("#tkSave").onclick = () => {
+  const cand = { line: $("#tkLine").value, from: $("#tkFrom").value, to: $("#tkTo").value };
+  // item 3: From===To -> inline red error, keep dialog open, don't clear pass
+  if (cand.from === cand.to) {
+    $("#tkErr").textContent = "From and To can't be the same station.";
+    $("#tkErr").style.display = "block";
+    return;
+  }
+  teiki = cand;
+  store.set("teiki", teiki); renderTeiki(); $("#tkErr").style.display = "none"; dlgT.close();
+  if (lastResults) doSearch();
+};
+$("#tkClear").onclick = () => { teiki = null; store.set("teiki", null); renderTeiki(); $("#tkErr").style.display = "none"; dlgT.close(); if (lastResults) doSearch(); };
+
+const dlgS = $("#dlgSettings");
+$("#btnSettings").onclick = () => {
+  $("#odptKey").value = store.get("odptKey", "");
+  $("#homeAddr").value = homeEP ? homeEP.name : "";
+  $("#workAddr").value = workEP ? workEP.name : "";
+  $("#setErr").style.display = "none";
+  dlgS.showModal();
+};
+async function resolveFreeText(q) {
+  q = (q || "").trim();
+  if (!q) return null;
+  const lq = q.toLowerCase();
+  const exact = allStations.find(s => s.toLowerCase() === lq);
+  if (exact) return { type: "station", name: exact };
+  const prefix = allStations.find(s => s.toLowerCase().startsWith(lq));
+  if (prefix) return { type: "station", name: prefix };
+  try {
+    const res = await Geo.geocode(q, 1);
+    if (!res.error && res.results.length) {
+      const p = res.results[0];
+      return { type: "place", name: p.name, lat: p.lat, lon: p.lon };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+$("#setSave").onclick = async () => {
+  store.set("odptKey", $("#odptKey").value.trim());
+  const setErr = $("#setErr"); setErr.style.display = "none";
+  const hv = $("#homeAddr").value.trim(), wv = $("#workAddr").value.trim();
+  try {
+    homeEP = hv ? await resolveFreeText(hv) : null;
+    workEP = wv ? await resolveFreeText(wv) : null;
+    store.set("home", homeEP); store.set("work", workEP);
+  } catch {
+    setErr.textContent = "Couldn't resolve one of the addresses — try a more specific query.";
+    setErr.style.display = "block";
+    return;
+  }
+  dlgS.close();
+  fetchDelays();
+};
+$("#setClose").onclick = () => dlgS.close();
+$("#mode").onchange = () => { $("#time").disabled = $("#mode").value === "now"; };
+
+// ---------- 6. Search ----------
+let lastResults = null, sortKey = "time", selectedKey = null;
+let searchCtx = null; // item 6: snapshot of {from,to} at search time
+$("#go").onclick = doSearch;
+
+function resolveEndpoint(key, raw) {
+  if (endpoint[key]) return endpoint[key];
+  const q = raw.trim().toLowerCase();
+  if (!q) return null;
+  const st = allStations.find(s => s.toLowerCase() === q) ||
+             allStations.find(s => s.toLowerCase().startsWith(q)) ||
+             allStations.find(s => s.toLowerCase().includes(q));
+  return st ? { type: "station", name: st } : null;
+}
+
+function candidatesFor(ep) {
+  if (ep.type === "station") return [{ name: ep.name, walkMin: 0, meters: 0 }];
+  return Geo.nearestStations(COORDS, ep.lat, ep.lon, 3, 1800)
+    .map(s => ({ name: s.name, walkMin: Geo.walkMin(s.meters), meters: s.meters }));
+}
+
+function clearResultsUI() {
+  lastResults = null; searchCtx = null;
+  $("#results").innerHTML = "";
+  $("#tabs").style.display = "none";
+  $("#resultsHead").style.display = "none";
+  $("#resultsHead").textContent = "";
+}
+
+async function doSearch() {
+  $("#error").innerHTML = "";
+  $("#go").disabled = true; $("#go").textContent = "Searching…";
+
+  try {
+    const from = resolveEndpoint("from", $("#from").value);
+    const to = resolveEndpoint("to", $("#to").value);
+    if (!from) { clearResultsUI(); return showErr("Pick an origin from the suggestions (station or place)."); }
+    if (!to) { clearResultsUI(); return showErr("Pick a destination from the suggestions."); }
+
+    // item 10: same station origin=dest
+    if (from.type === "station" && to.type === "station" && from.name === to.name) {
+      clearResultsUI();
+      return showErr("Origin and destination are the same.");
+    }
+
+    endpoint.from = from; endpoint.to = to;
+    await new Promise(r => setTimeout(r, 20)); // let UI paint
+
+    // item 7: nearestStations returning [] for a place
+    if (from.type === "place") {
+      const c = Geo.nearestStations(COORDS, from.lat, from.lon, 3, 1800);
+      if (!c.length) { clearResultsUI(); return showErr("That location looks outside the covered network (central Tokyo)."); }
+    }
+    if (to.type === "place") {
+      const c = Geo.nearestStations(COORDS, to.lat, to.lon, 3, 1800);
+      if (!c.length) { clearResultsUI(); return showErr("That location looks outside the covered network (central Tokyo)."); }
+    }
+
+    const candA = candidatesFor(from), candB = candidatesFor(to);
+    const merged = new Map();
+
+    for (const a of candA) for (const b of candB) {
+      if (a.name === b.name) continue;
+      const res = Engine.search(NET, a.name, b.name, teiki);
+      if (res.error) continue;
+      for (const r of res.routes) {
+        const total = a.walkMin + r.minutes + b.walkMin;
+        const key = a.name + "|" + r.key + "|" + b.name;
+        if (!merged.has(key) || merged.get(key).total > total) {
+          merged.set(key, { ...r, total, walkA: a, walkB: b, key });
+        }
+      }
+    }
+    let routes = [...merged.values()];
+    const hasStationPair = routes.length > 0;
+
+    // walk-only option: item 10 — if no usable station pair, no distance cap
+    if (from.type === "place" && to.type === "place") {
+      const d = Geo.distM([from.lat, from.lon], [to.lat, to.lon]);
+      const cap = hasStationPair ? 2500 : Infinity;
+      if (d <= cap) {
+        routes.push({ walkOnly: true, total: Geo.walkMin(d), minutes: Geo.walkMin(d), meters: Math.round(d),
+          fare: 0, fareWithoutPass: 0, transfers: 0, legs: [], flavors: [], key: "WALK",
+          coveredByPass: false, freeWithPass: false, walkA: null, walkB: null });
+      }
+    }
+    if (!routes.length) { clearResultsUI(); showErr("No route found."); return; }
+
+    // item 9: badge on FULL candidate set before slicing to 6, keep top-6-by-time UNION badged
+    routes.forEach(r => r.flavors = []);
+    const by = (fn) => routes.reduce((p, c) => (fn(c) < fn(p) ? c : p));
+    const fastest = by(r => r.total); fastest.flavors.push("fastest");
+    const cheapest = by(r => r.fare * 10000 + r.total); cheapest.flavors.push("cheapest");
+    const easiest = by(r => (r.walkOnly ? 99 : r.transfers) * 10000 + r.total); easiest.flavors.push("easiest");
+
+    const sorted = [...routes].sort((x, y) => x.total - y.total);
+    const top6 = sorted.slice(0, 6);
+    const badgedKeys = new Set([fastest.key, cheapest.key, easiest.key]);
+    const finalSet = new Map();
+    for (const r of top6) finalSet.set(r.key, r);
+    for (const r of routes) if (badgedKeys.has(r.key) && !finalSet.has(r.key)) finalSet.set(r.key, r);
+    routes = [...finalSet.values()];
+
+    lastResults = routes;
+    selectedKey = routes[0].key;
+
+    // item 6: snapshot endpoints at search time
+    searchCtx = { from, to };
+
+    // item 21: write resolved station names back into inputs + header uses resolved names
+    if (from.type === "station") $("#from").value = from.name;
+    if (to.type === "station") $("#to").value = to.name;
+
+    pushRecent(from, to);
+    renderResults();
+    drawMap(routes.find(r => r.key === selectedKey));
+    fetchDelays();
+    fetchScheduledDepartures(routes);
+
+    // item 18: scroll results into view
+    $("#results").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    clearResultsUI();
+    showErr("Something went wrong while searching. Please try again.");
+  } finally {
+    $("#go").disabled = false; $("#go").textContent = "Search routes";
+  }
+}
+function showErr(msg) { $("#error").innerHTML = `<div class="err">${esc(msg)}</div>`; }
+
+// ---------- 7. Time helpers ----------
+function baseDate() {
+  const d = new Date();
+  if ($("#mode").value !== "now" && $("#time").value) {
+    const [h, mi] = $("#time").value.split(":").map(Number);
+    d.setHours(h, mi, 0, 0);
+  }
+  return d;
+}
+
+// ---------- 8. Render results ----------
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  sortKey = b.dataset.sort;
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  renderResults();
+});
+
+// cache teiki coverage Set once per render pass (item 29)
+let _teikiSetCache = null;
+function teikiCoverageSet() {
+  if (!teiki) return null;
+  if (!_teikiSetCache) _teikiSetCache = Engine.teikiStations(G0, teiki);
+  return _teikiSetCache;
+}
+
+let lastDelayIssues = [];
+
+function renderResults() {
+  if (!lastResults) return;
+  _teikiSetCache = null; // recompute once per render pass
+
+  const rs = [...lastResults];
+  if (sortKey === "time") rs.sort((a, b) => a.total - b.total);
+  if (sortKey === "fare") rs.sort((a, b) => a.fare - b.fare || a.total - b.total);
+  if (sortKey === "transfers") rs.sort((a, b) => a.transfers - b.transfers || a.total - b.total);
+  $("#tabs").style.display = "flex";
+
+  // item 21: results header with resolved names
+  const fromName = searchCtx ? searchCtx.from.name : "";
+  const toName = searchCtx ? searchCtx.to.name : "";
+  $("#resultsHead").textContent = `${fromName} → ${toName}`;
+  $("#resultsHead").style.display = "block";
+
+  const mode = $("#mode").value, anchor = baseDate();
+
+  $("#results").innerHTML = rs.map(r => {
+    const times = computeTimes(r, mode, anchor);
+    const badges = [];
+    if (r.flavors.includes("fastest")) badges.push(`<span class="badge b-fast">FASTEST</span>`);
+    if (r.flavors.includes("cheapest")) badges.push(`<span class="badge b-cheap">CHEAPEST</span>`);
+    if (r.flavors.includes("easiest")) badges.push(`<span class="badge b-easy">EASIEST</span>`);
+    if (r.coveredByPass) badges.push(`<span class="badge b-teiki">🎫 PASS</span>`);
+    if (r.walkOnly) badges.push(`<span class="badge b-walk">🚶 WALK</span>`);
+
+    const fareHtml = r.walkOnly ? `<strong>¥0</strong>`
+      : r.freeWithPass ? `<span class="free">¥0 with pass</span><span class="was">¥${r.fareWithoutPass}</span>`
+      : r.coveredByPass && r.fare < r.fareWithoutPass
+        ? `<strong>¥${r.fare}</strong><span class="was">¥${r.fareWithoutPass}</span>`
+        : `<strong>¥${r.fare}</strong>`;
+
+    const walkAHtml = r.walkA && r.walkA.walkMin > 0
+      ? `<div class="leg"><div class="walkbar"></div><div class="body"><div class="linfo">🚶 Walk ${r.walkA.walkMin} min to ${esc(r.walkA.name)} (${r.walkA.meters} m)</div></div></div>` : "";
+    const walkBHtml = r.walkB && r.walkB.walkMin > 0
+      ? `<div class="leg"><div class="walkbar"></div><div class="body"><div class="linfo">🚶 Walk ${r.walkB.walkMin} min from ${esc(r.walkB.name)} (${r.walkB.meters} m)</div></div></div>` : "";
+    const walkOnlyHtml = r.walkOnly
+      ? `<div class="leg"><div class="walkbar"></div><div class="body"><div class="linfo">🚶 Walk the whole way — ${r.meters} m, ~${r.total} min</div></div></div>` : "";
+
+    return `<div class="route ${r.key === selectedKey ? "sel" : ""}" data-key="${esc(r.key)}" tabindex="0" role="button" aria-pressed="${r.key === selectedKey}">
+      <div class="route-head">
+        <span class="time" data-dep-arr>${fmt(times.dep)} → ${fmt(times.arr)}</span>
+        <span class="dur">${r.total} min</span>
+        <div class="badges">${badges.join("")}</div>
+      </div>
+      <div class="route-meta">
+        <span class="fare">${fareHtml}</span>
+        <span>${r.walkOnly ? "no trains" : r.transfers + " transfer" + (r.transfers === 1 ? "" : "s")}</span>
+      </div>
+      <div class="legs" data-legs>${walkOnlyHtml}${walkAHtml}${r.legs.map((leg, i) => legHtml(leg, i)).join("")}${walkBHtml}</div>
+    </div>`;
+  }).join("");
+
+  document.querySelectorAll(".route").forEach(el => {
+    const select = () => {
+      selectedKey = el.dataset.key;
+      document.querySelectorAll(".route").forEach(x => {
+        x.classList.toggle("sel", x === el);
+        x.setAttribute("aria-pressed", x === el ? "true" : "false");
+      });
+      drawMap(lastResults.find(r => r.key === selectedKey));
+    };
+    el.onclick = select;
+    // item 27: route cards keyboard-activatable
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); }
+    });
+  });
+
+  markDelayedLegs();
+}
+
+function computeTimes(r, mode, anchor) {
+  if (mode === "arrive") {
+    const arr = new Date(anchor);
+    const dep = new Date(arr.getTime() - r.total * 60000);
+    return { dep, arr };
+  }
+  const firstLine = r.legs.find(l => l.type === "ride");
+  const hw = firstLine ? (NET.LINES.find(L => L.id === firstLine.line)?.headway ?? 5) : 0;
+  const dep = new Date(anchor.getTime() + (r.walkOnly ? 0 : Math.ceil(hw / 2)) * 60000);
+  const arr = new Date(dep.getTime() + r.total * 60000);
+  return { dep, arr };
+}
+
+function legHtml(leg, idx) {
+  if (leg.type !== "ride") {
+    return `<div class="leg"><div class="walkbar"></div><div class="body">
+      <div class="linfo">🚶 ${leg.type === "walk" ? "Walk" : "Transfer"} ~${Math.round(leg.min)} min</div></div></div>`;
+  }
+  const L = NET.LINES.find(l => l.id === leg.line);
+  const covered = teikiCoverage(leg);
+  return `<div class="leg" data-leg-idx="${idx}" data-line-id="${esc(leg.line)}">
+    <div class="bar" style="background:${L.color}"></div>
+    <div class="body">
+      <div class="stn">${esc(leg.stations[0])}</div>
+      <div class="linfo"><span class="dot" style="background:${L.color}"></span>${esc(L.name)}
+        <span class="nstops">· ${leg.stations.length - 1} stop${leg.stations.length - 1 === 1 ? "" : "s"} · ${Math.round(leg.min)} min</span>
+        ${covered ? `<span class="teiki-mark">🎫 ${covered}</span>` : ""}
+        <span class="delaymark" data-delaymark style="display:none">⚠ delays reported</span></div>
+      <div class="dep-sched" data-dep-sched></div>
+      <div class="stn">${esc(leg.stations[leg.stations.length - 1])}</div>
+    </div></div>`;
+}
+function teikiCoverage(leg) {
+  if (!teiki || leg.line !== teiki.line) return "";
+  const tSet = teikiCoverageSet();
+  if (!tSet) return "";
+  const covered = leg.stations.filter(s => tSet.has(s)).length;
+  if (covered < 2) return "";
+  return covered === leg.stations.length ? "covered by pass" : "partly on pass";
+}
+
+function markDelayedLegs() {
+  if (!lastDelayIssues.length) return;
+  const lineIds = new Set(lastDelayIssues.filter(i => i.lineId).map(i => i.lineId));
+  if (!lineIds.size) return;
+  document.querySelectorAll(".leg[data-line-id]").forEach(el => {
+    if (lineIds.has(el.dataset.lineId)) {
+      const m = el.querySelector("[data-delaymark]");
+      if (m) m.style.display = "inline";
+    }
+  });
+}
+
+// ---------- 9. Map ----------
+let map = null, routeLayer = null;
+function ensureMap() {
+  if (typeof L === "undefined") return false;
+  $("#map").style.display = "block";
+  if (!map) {
+    map = L.map("map").setView([35.69, 139.75], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+  }
+  map.invalidateSize();
+  return true;
+}
+function drawMap(r) {
+  // item 5: guard all map code so results still render without Leaflet
+  if (typeof L === "undefined") return;
+  if (!r) return;
+  if (!ensureMap()) return;
+  if (routeLayer) routeLayer.remove();
+  routeLayer = L.layerGroup().addTo(map);
+  const pts = [];
+  const add = (ll) => { if (ll) pts.push(ll); };
+
+  // item 6: read from the snapshot (searchCtx), never live input state
+  const ctx = searchCtx || { from: endpoint.from, to: endpoint.to };
+  const epLL = (ep) => ep?.type === "place" ? [ep.lat, ep.lon] : (ep ? COORDS[ep.name] : null);
+  const oLL = epLL(ctx.from), dLL = epLL(ctx.to);
+
+  if (r.walkOnly) {
+    if (oLL && dLL) { L.polyline([oLL, dLL], { color: "#666", weight: 4, dashArray: "6 8" }).addTo(routeLayer); add(oLL); add(dLL); }
+  } else {
+    if (r.walkA && oLL && COORDS[r.walkA.name]) {
+      L.polyline([oLL, COORDS[r.walkA.name]], { color: "#666", weight: 3, dashArray: "5 7" }).addTo(routeLayer);
+      add(oLL);
+    }
+    for (const leg of r.legs) {
+      if (leg.type !== "ride") continue;
+      const L2 = NET.LINES.find(l => l.id === leg.line);
+      const path = leg.stations.map(s => COORDS[s]).filter(Boolean);
+      if (!path.length) continue;
+      L.polyline(path, { color: L2.color, weight: 5, opacity: .9 }).addTo(routeLayer);
+      path.forEach(add);
+      L.circleMarker(path[0], { radius: 5, color: "#fff", weight: 2, fillColor: L2.color, fillOpacity: 1 })
+        .bindTooltip(leg.stations[0]).addTo(routeLayer);
+      L.circleMarker(path[path.length - 1], { radius: 5, color: "#fff", weight: 2, fillColor: L2.color, fillOpacity: 1 })
+        .bindTooltip(leg.stations[leg.stations.length - 1]).addTo(routeLayer);
+    }
+    if (r.walkB && dLL && COORDS[r.walkB.name]) {
+      L.polyline([COORDS[r.walkB.name], dLL], { color: "#666", weight: 3, dashArray: "5 7" }).addTo(routeLayer);
+      add(dLL);
+    }
+  }
+  if (oLL) L.marker(oLL).bindTooltip("Start").addTo(routeLayer);
+  if (dLL) L.marker(dLL).bindTooltip("End").addTo(routeLayer);
+  if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.15));
+}
+
+// ---------- 10. ODPT: scheduled departures + delays ----------
+let _depFetchToken = 0;
+async function fetchScheduledDepartures(routes) {
+  if (typeof ODPT === "undefined") return;
+  const key = store.get("odptKey", "");
+  if (!key) return;
+  const myToken = ++_depFetchToken; // avoid duplicate in-flight fetches / stale patches
+  const routesSnapshot = routes;
+
+  await Promise.all(routesSnapshot.map(async (r) => {
+    if (r.walkOnly) return;
+    const firstRide = r.legs.find(l => l.type === "ride");
+    if (!firstRide) return;
+    try {
+      const departures = await ODPT.nextDepartures({
+        key, net: NET, lineId: firstRide.line,
+        station: firstRide.stations[0], toward: firstRide.stations[1], count: 3
+      });
+      if (myToken !== _depFetchToken) return;      // a newer search superseded this
+      if (!lastResults || !lastResults.includes(r)) return; // stale card, results changed
+      if (!departures || !departures.length) return; // null -> keep estimate
+
+      const cardEl = document.querySelector(`.route[data-key="${CSS.escape(r.key)}"]`);
+      if (!cardEl) return;
+      const legEl = cardEl.querySelector(`.leg[data-leg-idx]`);
+      const schedEl = legEl && legEl.querySelector("[data-dep-sched]");
+      const first = departures[0];
+      const rest = departures.slice(1);
+      if (schedEl) {
+        schedEl.textContent = rest.length
+          ? `Departs ${first} · then ${rest.join(", ")} (scheduled)`
+          : `Departs ${first} (scheduled)`;
+      }
+      // patch dep -> arr header using the scheduled first departure
+      const [hh, mm] = first.split(":").map(Number);
+      const anchor = baseDate();
+      const dep = new Date(anchor);
+      dep.setHours(hh, mm, 0, 0);
+      const arr = new Date(dep.getTime() + r.total * 60000);
+      const headerTime = cardEl.querySelector("[data-dep-arr]");
+      if (headerTime) headerTime.textContent = `${fmt(dep)} → ${fmt(arr)}`;
+    } catch { /* keep estimate on failure */ }
+  }));
+}
+
+async function fetchDelays() {
+  const bar = $("#delaybar");
+  if (typeof ODPT === "undefined") { bar.style.display = "none"; return; }
+  const key = store.get("odptKey", "");
+  if (!key) { bar.style.display = "none"; lastDelayIssues = []; return; }
+  try {
+    const info = await ODPT.trainInfo({ key });
+    if (!info || !info.ok) {
+      bar.style.display = "block";
+      bar.textContent = "Could not reach ODPT (check key / network).";
+      return;
+    }
+    lastDelayIssues = info.issues || [];
+    bar.style.display = "block";
+    if (!lastDelayIssues.length) {
+      bar.textContent = "✅ All lines reporting normal service (ODPT live)";
+    } else {
+      bar.innerHTML = "⚠️ " + lastDelayIssues.slice(0, 5).map(i => {
+        const line = i.lineId ? esc(i.lineId.split(".").pop()) : "";
+        return `<b>${line}</b>${line ? ": " : ""}${esc(i.text)}`;
+      }).join("<br>");
+    }
+    markDelayedLegs();
+  } catch (e) {
+    bar.style.display = "block";
+    bar.textContent = "Could not reach ODPT (check key / network).";
+  }
+}
+
+// initial delay check on page load (item 14)
+fetchDelays();
+</script>
+</body>
+</html>
