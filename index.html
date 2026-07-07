@@ -1028,6 +1028,153 @@ window.STATION_ANCHORS = {
 
   const BASE = "https://api.odpt.org/api/v4";
 
+  /* --- injected: JA→EN alert translator (ODPT .en is empty in practice) --- */
+  // ---------- ODPT train-information JA→EN phrase translator ----------
+  // ODPT's odpt:trainInformationText.en is empty for Metro/Toei/JR-East in practice,
+  // so JA-only alert text must be translated client-side. Texts are highly templated.
+  // Strategy: (1) detect "normal service" phrasings and treat as no-issue;
+  //           (2) otherwise, substring-replace known phrase fragments JA→EN, longest-first;
+  //           (3) if residual Japanese remains, append the original in parens so nothing is lost.
+
+  const NORMAL_RE = /平常どおり運転|平常運転|遅延はありません|通常どおり運転|運転しています。?$/;
+  // Note: Toei uses 「現在、１５分以上の遅延はありません。」 — caught by 遅延はありません.
+
+  // Longest-first so compound phrases win over their fragments.
+  const PHRASES = [
+    // --- status verbs / disruption types ---
+    ["運転を見合わせています", "service suspended"],
+    ["運転見合わせ", "service suspended"],
+    ["運転を再開しました", "service resumed"],
+    ["運転再開", "service resumed"],
+    ["運転を再開する見込みです", "service expected to resume"],
+    ["運転を再開する予定です", "service expected to resume"],
+    ["直通運転を中止しています", "through-service cancelled"],
+    ["直通運転中止", "through-service cancelled"],
+    ["一部列車で運休", "some trains cancelled"],
+    ["運休となっています", "cancelled"],
+    ["運休", "cancelled"],
+    ["ダイヤが乱れています", "schedule disrupted"],
+    ["ダイヤ乱れ", "schedule disrupted"],
+    ["遅れがでています", "delays occurring"],
+    ["遅れが出ています", "delays occurring"],
+    ["遅延がでています", "delays occurring"],
+    ["遅延が出ています", "delays occurring"],
+    ["の遅れがでています", " delays"],
+    ["遅延", "delays"],
+    ["遅れ", "delays"],
+    ["本数を減らして運転しています", "running a reduced service"],
+    ["本数を減らして運転", "reduced service"],
+    ["徐行運転を行っています", "running at reduced speed"],
+    ["徐行運転", "reduced-speed operation"],
+    ["折り返し運転を行っています", "running shuttle service"],
+    ["折り返し運転", "shuttle service"],
+    // --- causes ---
+    ["人身事故", "personal-injury accident"],
+    ["急病人の救護", "assisting an ill passenger"],
+    ["急病人", "ill passenger"],
+    ["車両点検", "vehicle inspection"],
+    ["車両故障", "vehicle malfunction"],
+    ["信号点検", "signal inspection"],
+    ["信号故障", "signal failure"],
+    ["線路内点検", "track inspection"],
+    ["線路内立ち入り", "trespassing on the tracks"],
+    ["踏切点検", "level-crossing inspection"],
+    ["踏切支障", "level-crossing obstruction"],
+    ["停電", "power outage"],
+    ["강풍", "strong winds"], // guard against stray hangul; harmless
+    ["強風", "strong winds"],
+    ["大雨", "heavy rain"],
+    ["大雪", "heavy snow"],
+    ["降雪", "snowfall"],
+    ["台風", "typhoon"],
+    ["地震", "earthquake"],
+    ["火災", "fire"],
+    ["設備点検", "equipment inspection"],
+    ["設備故障", "equipment failure"],
+    ["架線点検", "overhead-line inspection"],
+    ["架線故障", "overhead-line failure"],
+    ["混雑", "congestion"],
+    ["安全確認", "safety check"],
+    ["お客様同士のトラブル", "a passenger dispute"],
+    // --- connective / framing fragments ---
+    // Render cause→effect as "effect — due to cause" reads awkwardly; instead we mark
+    // the causal boundary with " — " and prefix "due to" so output is "[cause] — [effect]".
+    // Simplest natural reading: replace the causal connective with " — " (em dash),
+    // giving "[cause] — [effect]". Longest-first.
+    ["の影響により、", " — "],
+    ["の影響により", " — "],
+    ["の影響で、", " — "],
+    ["の影響で", " — "],
+    ["のため、", " — "],
+    ["のために", " — "],
+    ["のため", " — "],
+    ["ため、", " — "],
+    ["現在、", "Currently, "],
+    ["現在", "currently"],
+    ["および", " and "],
+    ["ならびに", " and "],
+    ["区間で", " section: "],
+    ["区間", " section"],
+    ["上下線で", "both directions: "],
+    ["上下線", "both directions"],
+    ["上り線で", "inbound: "],
+    ["下り線で", "outbound: "],
+    ["上り線", "inbound"],
+    ["下り線", "outbound"],
+    ["全線", "entire line"],
+    ["一部区間", "part of the line"],
+    ["見込みです", "expected"],
+    ["予定です", "planned"],
+    ["を行っています", ""],
+    ["を行っており", ""],
+    ["がでています", ""],
+    ["が出ています", ""],
+    ["でています", ""],
+    ["となっています", ""],
+    ["しています", ""],
+    ["ています", ""],
+    ["します", ""],
+    ["である", ""],
+    ["です", ""],
+    ["ます", ""],
+    ["で、", ", "],
+    ["で", " "],
+    ["を", " "],
+    ["が", " "],
+    ["に", " "],
+    // punctuation
+    ["。", ". "],
+    ["、", ", "],
+    ["　", " "],
+  ];
+
+  // Detect whether a string still contains CJK (unresolved Japanese).
+  const CJK_RE = /[぀-ヿ㐀-䶿一-鿿]/;
+
+  function translateAlert(ja) {
+    if (!ja) return "";
+    if (NORMAL_RE.test(ja)) return null; // signal: normal service, not an issue
+    let s = ja;
+    for (const [j, e] of PHRASES) s = s.split(j).join(e);
+    // tidy whitespace/punctuation
+    s = s.replace(/\s{2,}/g, " ").replace(/\s+([.,])/g, "$1").replace(/\.\s*\./g, ".").trim();
+    if (!s) s = ja;
+    // If Japanese remains, keep the original alongside so info isn't lost.
+    if (CJK_RE.test(s)) {
+      const stripped = s.replace(new RegExp(CJK_RE.source, "g"), "").replace(/\s{2,}/g, " ").trim();
+      return stripped.length > 3 ? `${stripped} (${ja})` : ja;
+    }
+    // Capitalize first letter.
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  // isNormal helper for filtering.
+  function isNormalText(ja) {
+    return !ja || NORMAL_RE.test(ja);
+  }
+
+
+
   // Our line id -> {operator, railway} on the ODPT side.
   const RAILWAYS = {
     E: { operator: "Toei", railway: "Toei.Oedo" },
@@ -1244,9 +1391,17 @@ window.STATION_ANCHORS = {
       const issues = [];
       for (const item of list) {
         const textObj = item["odpt:trainInformationText"] || {};
-        const text = textObj.en || textObj.ja;
+        const ja = textObj.ja || "";
+        let text = textObj.en || "";
+        // ODPT's .en is empty for Metro/Toei/JR-East in practice, so translate JA.
+        if (!text) {
+          const tr = translateAlert(ja);   // returns null for normal-service phrasings
+          if (tr === null) continue;        // normal service → not an issue
+          text = tr;
+        } else if (/normal|平常/i.test(text)) {
+          continue;                         // English "normal" → not an issue
+        }
         if (!text) continue;
-        if (/normal|平常/i.test(text)) continue; // not an issue
 
         const railway = item["odpt:railway"] || "";
         const railwaySuffix = railway.startsWith("odpt.Railway:") ? railway.slice("odpt.Railway:".length) : railway;
